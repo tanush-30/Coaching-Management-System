@@ -16,11 +16,18 @@ import {
   Clock, 
   MessageSquare, 
   BookOpen, 
-  TrendingUp,
-  Rocket,
-  RotateCcw,
-  Plus
+  TrendingUp, 
+  Rocket, 
+  RotateCcw, 
+  Plus,
+  LogOut,
+  ShieldCheck,
+  UserCheck
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { signOut } from 'firebase/auth';
+import { auth, isFirebaseConfigured } from '@/lib/firebase';
+import { useAuth } from '@/lib/auth-context';
 import { DiscoveryBlueprintView } from '@/components/discovery/DiscoveryBlueprintView';
 import { AdminDashboard } from '@/components/erp/AdminDashboard';
 import { StudentManagement } from '@/components/erp/StudentManagement';
@@ -40,9 +47,25 @@ import { useERPStore } from '@/lib/store';
 import { UserRole } from '@/lib/types';
 
 export default function Home() {
+  const router = useRouter();
+  const { user, role: userRole } = useAuth();
   const [activeMainTab, setActiveMainTab] = useState<'phase0' | 'live_erp' | 'phase6_launch'>('live_erp');
   const [activeErpSubTab, setActiveErpSubTab] = useState<'dashboard' | 'students' | 'batches' | 'fees' | 'attendance' | 'academics' | 'analytics' | 'whatsapp'>('dashboard');
   const [activeRole, setActiveRole] = useState<UserRole>('admin');
+
+  // Handle Logout
+  const handleSignOut = async () => {
+    try {
+      if (isFirebaseConfigured) {
+        await signOut(auth);
+      }
+    } catch {
+      // Ignore
+    }
+    // Clear session cookie
+    document.cookie = 'apex_session=; path=/; max-age=0';
+    router.replace('/login');
+  };
 
   // Modals
   const [isEnrollModalOpen, setIsEnrollModalOpen] = useState(false);
@@ -134,10 +157,19 @@ export default function Home() {
             </button>
           </div>
 
-          {/* 4-Role Persona Switcher Header */}
+          {/* User Auth & 4-Role Persona Switcher Header */}
           <div className="flex items-center gap-2">
+            {/* User Profile Badge */}
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-100/90 border border-slate-200/90 rounded-2xl text-xs font-semibold text-slate-700">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[11px] text-slate-600 max-w-[140px] truncate">
+                {user?.email || user?.phoneNumber || 'Admin (Demo Mode)'}
+              </span>
+            </div>
+
+            {/* Role Switcher */}
             <div className="flex items-center gap-1 p-1 bg-slate-100 border border-slate-200 rounded-2xl text-xs font-bold">
-              <span className="text-[10px] font-bold text-slate-400 uppercase px-2">Role:</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase px-1.5">Role:</span>
               {(['admin', 'teacher', 'parent', 'student'] as UserRole[]).map((role) => (
                 <button
                   key={role}
@@ -156,16 +188,14 @@ export default function Home() {
               ))}
             </div>
 
+            {/* Sign Out Button */}
             <button
-              onClick={() => {
-                if (confirm('Reset all demo data to default state?')) {
-                  resetToDefaults();
-                }
-              }}
-              className="text-[11px] text-slate-500 hover:text-slate-800 p-2 rounded-xl hover:bg-slate-100 hidden sm:flex items-center gap-1 border"
-              title="Reset Demo Database"
+              onClick={handleSignOut}
+              className="flex items-center gap-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 rounded-2xl text-xs font-bold transition-all active:scale-95 shadow-xs"
+              title="Sign Out"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         </div>
