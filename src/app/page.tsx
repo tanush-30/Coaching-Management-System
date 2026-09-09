@@ -1,5 +1,9 @@
 'use client';
 
+// Force dynamic rendering — this page depends on Firebase Auth and must never be
+// statically pre-rendered at build time (Firebase Client SDK is browser-only)
+export const dynamic = 'force-dynamic';
+
 import React, { useState } from 'react';
 import { 
   Sparkles, 

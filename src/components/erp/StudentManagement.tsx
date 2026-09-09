@@ -17,7 +17,8 @@ import {
   CheckCircle2, 
   AlertCircle,
   ExternalLink,
-  DollarSign
+  DollarSign,
+  X
 } from 'lucide-react';
 import { Batch, FeeInstallment, Student } from '@/lib/types';
 import { AddStudentModal } from './AddStudentModal';

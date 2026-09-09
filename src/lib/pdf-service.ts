@@ -1,15 +1,20 @@
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable, { UserOptions } from 'jspdf-autotable';
 import { Student, FeeInstallment, ExamTest, StudentExamMark } from './types';
 
-// Extend jsPDF types for autoTable
+// Extend jsPDF types for autoTable with proper UserOptions typing
 declare module 'jspdf' {
   interface jsPDF {
-    autoTable: (options: any) => jsPDF;
+    autoTable: (options: UserOptions) => jsPDF;
     lastAutoTable: {
       finalY: number;
     };
   }
+}
+
+// Helper to call autoTable in a type-safe way
+function addTable(doc: jsPDF, options: UserOptions): void {
+  autoTable(doc, options);
 }
 
 export const generateFeeReceiptPDF = (student: Student, installment: FeeInstallment) => {
