@@ -80,6 +80,17 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setIsLoading(true);
+
+    if (!isFirebaseConfigured) {
+      // In local dev mode without Firebase credentials, simulate OTP dispatch
+      setTimeout(() => {
+        setIsLoading(false);
+        setPhoneStep('enter_otp');
+        setOtp('123456'); // pre-fill demo OTP for quick testing
+      }, 600);
+      return;
+    }
+
     try {
       if (!window.recaptchaVerifier) {
         window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
@@ -101,9 +112,22 @@ export default function LoginPage() {
   // --- Phone OTP: Step 2 — Verify OTP ---
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!confirmationResult) return;
     setError('');
     setIsLoading(true);
+
+    if (!isFirebaseConfigured) {
+      // Local dev mode verification
+      setTimeout(() => {
+        handleDemoLogin();
+      }, 500);
+      return;
+    }
+
+    if (!confirmationResult) {
+      setIsLoading(false);
+      return;
+    }
+
     try {
       await confirmationResult.confirm(otp);
       router.replace('/');
