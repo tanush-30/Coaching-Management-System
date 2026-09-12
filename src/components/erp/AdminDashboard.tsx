@@ -16,27 +16,31 @@ import {
   Calendar,
   Sparkles
 } from 'lucide-react';
-import { Batch, FeeInstallment, Student, WhatsAppMessage } from '@/lib/types';
+import { Batch, FeeInstallment, Student, Teacher, WhatsAppMessage } from '@/lib/types';
 import { generateFeeReceiptPDF } from '@/lib/pdf-service';
 
 interface AdminDashboardProps {
   students: Student[];
   batches: Batch[];
+  teachers?: Teacher[];
   installments: FeeInstallment[];
   whatsappLogs: WhatsAppMessage[];
   onNavigateTab: (tab: string) => void;
   onOpenEnrollModal: () => void;
   onOpenBatchModal: () => void;
+  onOpenTeacherModal?: () => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   students,
   batches,
+  teachers = [],
   installments,
   whatsappLogs,
   onNavigateTab,
   onOpenEnrollModal,
   onOpenBatchModal,
+  onOpenTeacherModal,
 }) => {
   const totalRevenueCollected = installments.filter((i) => i.status === 'paid').reduce((sum, i) => sum + i.amount, 0);
   const totalOverdueDues = installments.filter((i) => i.status === 'overdue').reduce((sum, i) => sum + i.amount, 0);
@@ -63,7 +67,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               Academy Operations & Financial Command Center
             </h1>
             <p className="text-slate-300 text-xs md:text-sm max-w-2xl">
-              Live overview of student enrollments, batch occupancy, fee collection velocity, and real-time WhatsApp parent alerts.
+              Live overview of student enrollments, faculty roster, batch occupancy, fee collection velocity, and real-time WhatsApp parent alerts.
             </p>
           </div>
 
@@ -75,6 +79,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <Plus className="w-4 h-4" />
               <span>Enroll Student</span>
             </button>
+            {onOpenTeacherModal && (
+              <button
+                onClick={onOpenTeacherModal}
+                className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-purple-600/30 transition-all hover:scale-[1.02] active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Enroll Faculty</span>
+              </button>
+            )}
             <button
               onClick={onOpenBatchModal}
               className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-4 py-2.5 rounded-xl text-xs border border-slate-700 transition-all"
@@ -157,40 +170,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="space-y-3">
-            {batches.map((batch) => {
-              const capPercent = Math.round((batch.enrolledCount / batch.capacity) * 100);
-              return (
-                <div key={batch.id} className="p-4 rounded-2xl border border-slate-100 hover:bg-slate-50 transition-all flex items-center justify-between gap-4 text-xs">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-900 text-sm">{batch.name}</span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700">
-                        {batch.grade}
-                      </span>
+            {batches.length === 0 ? (
+              <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl text-xs space-y-2">
+                <div className="text-slate-400">No active batches created yet.</div>
+                <button
+                  onClick={onOpenBatchModal}
+                  className="text-indigo-600 font-bold hover:underline inline-flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Create Your First Batch
+                </button>
+              </div>
+            ) : (
+              batches.map((batch) => {
+                const capPercent = batch.capacity > 0 ? Math.round((batch.enrolledCount / batch.capacity) * 100) : 0;
+                return (
+                  <div key={batch.id} className="p-4 rounded-2xl border border-slate-100 hover:bg-slate-50 transition-all flex items-center justify-between gap-4 text-xs">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-900 text-sm">{batch.name}</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700">
+                          {batch.grade}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        Lead Faculty: <span className="font-semibold text-slate-700">{batch.teacherName}</span> • {batch.room}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {batch.scheduleDays.join(', ')} ({batch.startTime})
+                      </div>
                     </div>
-                    <div className="text-[11px] text-slate-500">
-                      Lead Faculty: <span className="font-semibold text-slate-700">{batch.teacherName}</span> • {batch.room}
-                    </div>
-                    <div className="text-[10px] text-slate-400">
-                      {batch.scheduleDays.join(', ')} ({batch.startTime})
-                    </div>
-                  </div>
 
-                  <div className="text-right space-y-1 min-w-[120px]">
-                    <div className="text-xs font-bold text-slate-900">
-                      {batch.enrolledCount} / {batch.capacity} Students
+                    <div className="text-right space-y-1 min-w-[120px]">
+                      <div className="text-xs font-bold text-slate-900">
+                        {batch.enrolledCount} / {batch.capacity} Students
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-indigo-600 rounded-full"
+                          style={{ width: `${Math.min(100, capPercent)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-slate-500">{capPercent}% Occupancy</span>
                     </div>
-                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-indigo-600 rounded-full"
-                        style={{ width: `${Math.min(100, capPercent)}%` }}
-                      />
-                    </div>
-                    <span className="text-[10px] text-slate-500">{capPercent}% Occupancy</span>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -254,21 +279,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <span className="text-xs text-slate-500 font-medium">Official WhatsApp Cloud API</span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-          {whatsappLogs.slice(0, 4).map((log) => (
-            <div key={log.id} className="p-3.5 rounded-2xl border border-slate-100 bg-slate-50/60 space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-900">{log.recipientName}</span>
-                <span className="text-[10px] text-slate-400">{log.timestamp}</span>
+        {whatsappLogs.length === 0 ? (
+          <div className="p-8 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-2xl">
+            💬 No WhatsApp dispatches yet. Automated messages will appear here when attendance, fee reminders, or exam marks are recorded.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            {whatsappLogs.slice(0, 4).map((log) => (
+              <div key={log.id} className="p-3.5 rounded-2xl border border-slate-100 bg-slate-50/60 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-900">{log.recipientName}</span>
+                  <span className="text-[10px] text-slate-400">{log.timestamp}</span>
+                </div>
+                <p className="text-slate-600 text-[11px] line-clamp-2">{log.content.replace(/\*/g, '')}</p>
+                <div className="flex items-center justify-between text-[10px] pt-1 text-slate-500">
+                  <span className="capitalize font-semibold text-indigo-600">{log.type.replace('_', ' ')}</span>
+                  <span className="text-emerald-700 font-bold">Delivered ✓✓</span>
+                </div>
               </div>
-              <p className="text-slate-600 text-[11px] line-clamp-2">{log.content.replace(/\*/g, '')}</p>
-              <div className="flex items-center justify-between text-[10px] pt-1 text-slate-500">
-                <span className="capitalize font-semibold text-indigo-600">{log.type.replace('_', ' ')}</span>
-                <span className="text-emerald-700 font-bold">Delivered ✓✓</span>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

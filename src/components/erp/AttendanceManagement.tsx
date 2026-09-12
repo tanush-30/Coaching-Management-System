@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Clock, 
   Calendar, 
@@ -18,6 +18,7 @@ import {
   History
 } from 'lucide-react';
 import { AttendanceRecord, Batch, BatchAttendance, Student, Teacher } from '@/lib/types';
+import { UserAvatar } from '@/components/common/UserAvatar';
 
 interface AttendanceManagementProps {
   batches: Batch[];
@@ -29,7 +30,7 @@ interface AttendanceManagementProps {
     date: string,
     records: AttendanceRecord[],
     markedBy: string
-  ) => { presentCount: number; absentCount: number; alertsSent: number };
+  ) => Promise<{ presentCount: number; absentCount: number; alertsSent: number }> | { presentCount: number; absentCount: number; alertsSent: number };
 }
 
 export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
@@ -43,75 +44,120 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [activeTab, setActiveTab] = useState<'mark' | 'history'>('mark');
 
-  const selectedBatch = batches.find((b) => b.id === selectedBatchId) || batches[0];
-  const enrolledStudents = students.filter((s) => s.batchIds.includes(selectedBatchId));
+  useEffect(() => {
+    if ((!selectedBatchId || !batches.some(b => b.id === selectedBatchId)) && batches.length > 0) {
+      setSelectedBatchId(batches[0].id);
+    }
+  }, [batches, selectedBatchId]);
 
-  // Current marking state
-  const [attendanceMap, setAttendanceMap] = useState<Record<string, { status: 'present' | 'absent' | 'late'; remarks: string }>>({});
+  const selectedBatch = batches.find((b) => b.id === selectedBatchId) || batches[0] || null;
+  const enrolledStudents = selectedBatch
+    ? students.filter(
+        (s) =>
+          (s.batchIds || []).includes(selectedBatch.id) ||
+          (s as any).batchId === selectedBatch.id
+      )
+    : [];
+
+  // Local state for mark attendance form
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, { status: 'present' | 'absent' | 'late'; remarks?: string }>>({});
   const [submissionFeedback, setSubmissionFeedback] = useState<{ present: number; absent: number; alerts: number } | null>(null);
 
-  // Initialize or reset marking state when batch changes
-  React.useEffect(() => {
-    const initialMap: Record<string, { status: 'present' | 'absent' | 'late'; remarks: string }> = {};
-    enrolledStudents.forEach((s) => {
-      initialMap[s.id] = { status: 'present', remarks: '' };
+  // Initialize attendance map when batch or date changes
+  useEffect(() => {
+    if (!selectedBatch) {
+      setAttendanceMap({});
+      return;
+    }
+
+    // Check if attendance is already recorded in history
+    const existing = attendanceHistory.find((a) => a.batchId === selectedBatch.id && a.date === selectedDate);
+    const initialMap: Record<string, { status: 'present' | 'absent' | 'late'; remarks?: string }> = {};
+
+    enrolledStudents.forEach((student) => {
+      if (existing) {
+        const rec = existing.records.find(
+          (r) =>
+            r.studentId === student.id ||
+            r.studentId === student.rollNo ||
+            (r as any).rollNo === student.rollNo ||
+            ((r as any).studentName && (r as any).studentName.toLowerCase() === student.name.toLowerCase())
+        );
+        initialMap[student.id] = {
+          status: rec ? rec.status : 'present',
+          remarks: rec?.remarks || '',
+        };
+      } else {
+        initialMap[student.id] = { status: 'present' };
+      }
     });
+
     setAttendanceMap(initialMap);
     setSubmissionFeedback(null);
-  }, [selectedBatchId, students]);
+  }, [selectedBatchId, selectedDate, students, batches, attendanceHistory]);
 
-  const toggleStatus = (studentId: string, status: 'present' | 'absent' | 'late') => {
+  const handleStatusChange = (studentId: string, status: 'present' | 'absent' | 'late') => {
     setAttendanceMap((prev) => ({
       ...prev,
-      [studentId]: {
-        ...prev[studentId],
-        status,
-      },
+      [studentId]: { ...prev[studentId], status },
     }));
     setSubmissionFeedback(null);
   };
 
-  const handleRemarkChange = (studentId: string, remarks: string) => {
+  const handleRemarksChange = (studentId: string, remarks: string) => {
     setAttendanceMap((prev) => ({
       ...prev,
-      [studentId]: {
-        ...prev[studentId],
-        remarks,
-      },
+      [studentId]: { ...prev[studentId], remarks },
     }));
   };
 
-  const handleMarkAllPresent = () => {
-    const updated: Record<string, { status: 'present' | 'absent' | 'late'; remarks: string }> = {};
-    enrolledStudents.forEach((s) => {
-      updated[s.id] = { status: 'present', remarks: '' };
+  const handleMarkAll = (status: 'present' | 'absent') => {
+    const updated: Record<string, { status: 'present' | 'absent' | 'late'; remarks?: string }> = {};
+    enrolledStudents.forEach((student) => {
+      updated[student.id] = { ...attendanceMap[student.id], status };
     });
     setAttendanceMap(updated);
     setSubmissionFeedback(null);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleMarkAllPresent = () => {
+    handleMarkAll('present');
+  };
+
+  const toggleStatus = (studentId: string, status: 'present' | 'absent' | 'late') => {
+    handleStatusChange(studentId, status);
+  };
+
+  const handleRemarkChange = (studentId: string, remarks: string) => {
+    handleRemarksChange(studentId, remarks);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (enrolledStudents.length === 0) return;
 
     const records: AttendanceRecord[] = enrolledStudents.map((s) => ({
       studentId: s.id,
+      rollNo: s.rollNo,
+      studentName: s.name,
       status: attendanceMap[s.id]?.status || 'present',
-      remarks: attendanceMap[s.id]?.remarks || undefined,
-    }));
+      remarks: attendanceMap[s.id]?.remarks || '',
+    } as any));
 
-    const result = onMarkAttendance(
+    const result = await onMarkAttendance(
       selectedBatchId,
       selectedDate,
       records,
-      selectedBatch.teacherName || 'Lead Faculty'
+      selectedBatch?.teacherName || 'Lead Faculty'
     );
 
-    setSubmissionFeedback({
-      present: result.presentCount,
-      absent: result.absentCount,
-      alerts: result.alertsSent,
-    });
+    if (result) {
+      setSubmissionFeedback({
+        present: result.presentCount,
+        absent: result.absentCount,
+        alerts: result.alertsSent,
+      });
+    }
   };
 
   const presentCount = Object.values(attendanceMap).filter((v) => v.status === 'present').length;
@@ -124,7 +170,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Phase 2: Attendance & WhatsApp Automation</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Attendance Register & Dispatch</span>
             <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
               Meta Cloud API Active
             </span>
@@ -264,7 +310,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
                     {enrolledStudents.length === 0 ? (
                       <tr>
                         <td colSpan={4} className="p-8 text-center text-slate-400">
-                          No students enrolled in {selectedBatch.name}. Enroll students in Phase 1 Roster first.
+                          No students enrolled in {selectedBatch?.name || 'this batch'}. Enroll students in the Student Directory first.
                         </td>
                       </tr>
                     ) : (
@@ -277,10 +323,11 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({
                             {/* Student */}
                             <td className="p-4">
                               <div className="flex items-center gap-3">
-                                <img
+                                <UserAvatar
                                   src={student.avatar}
-                                  alt={student.name}
-                                  className="w-9 h-9 rounded-full object-cover border"
+                                  name={student.name}
+                                  type="student"
+                                  size="sm"
                                 />
                                 <div>
                                   <div className="font-bold text-slate-900 text-sm">{student.name}</div>

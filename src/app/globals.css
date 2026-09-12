@@ -64,6 +64,15 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 224.3 76.3% 48%;
   }
+
+  :root {
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-out-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+    --dur-fast: 150ms;
+    --dur-base: 300ms;
+    --dur-slow: 500ms;
+    --dur-ambient: 4000ms;
+  }
 }
 
 @layer base {
@@ -106,4 +115,194 @@
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ==========================================================================
+   Animation System & Keyframes (Hardware Accelerated)
+   ========================================================================== */
+
+@keyframes floatSlow {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes floatReverse {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(8px);
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.03);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes popIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.88) translateY(8px);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.02) translateY(-1px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Animation Utility Classes */
+.animate-float-slow {
+  animation: floatSlow 6s ease-in-out infinite;
+}
+
+.animate-float-reverse {
+  animation: floatReverse 7s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 4s ease-in-out infinite;
+}
+
+.animate-shimmer-sweep {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.25) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 3s infinite linear;
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp var(--dur-base) var(--ease-out-smooth) forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn var(--dur-base) var(--ease-spring) forwards;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight var(--dur-base) var(--ease-out-smooth) forwards;
+}
+
+.animate-slide-in-left {
+  animation: slideInLeft var(--dur-base) var(--ease-out-smooth) forwards;
+}
+
+.animate-pop-in {
+  animation: popIn var(--dur-base) var(--ease-spring) forwards;
+}
+
+/* Smooth Accordion Grid Utility */
+.accordion-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-base) var(--ease-out-smooth);
+}
+
+.accordion-grid.open {
+  grid-template-rows: 1fr;
+}
+
+.accordion-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Prefers Reduced Motion Guardrail */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-float-slow,
+  .animate-float-reverse,
+  .animate-pulse-glow,
+  .animate-shimmer-sweep {
+    animation: none !important;
+  }
+
+  .animate-fade-in-up,
+  .animate-scale-in,
+  .animate-slide-in-right,
+  .animate-slide-in-left,
+  .animate-pop-in {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
 }

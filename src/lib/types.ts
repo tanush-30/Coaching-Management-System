@@ -1,8 +1,49 @@
 export type UserRole = 'admin' | 'teacher' | 'parent' | 'student';
 
+export interface AdminClaims {
+  role: 'admin';
+  mustChangePassword?: boolean;
+}
+
+export interface TeacherClaims {
+  role: 'teacher';
+  batchIds: string[];
+  customId?: string;
+  mustChangePassword?: boolean;
+}
+
+export interface StudentClaims {
+  role: 'student';
+  studentId: string;
+  batchId: string;
+  customId?: string;
+  mustChangePassword?: boolean;
+}
+
+export interface ParentClaims {
+  role: 'parent';
+  childIds: string[];
+}
+
+export type UserClaims = AdminClaims | TeacherClaims | StudentClaims | ParentClaims;
+
+export interface AuditLogEntry {
+  id: string;
+  actorUid: string;
+  actorRole: UserRole;
+  action: string;
+  targetId: string;
+  before?: Record<string, any>;
+  after?: Record<string, any>;
+  timestamp: string;
+  ip?: string;
+}
+
 export interface Student {
   id: string;
   rollNo: string;
+  firstName?: string;
+  lastName?: string;
   name: string;
   email: string;
   phone: string;
@@ -23,8 +64,20 @@ export interface Student {
   pendingFee: number;
 }
 
+export interface MemberIdRegistry {
+  id: string; // The globally unique custom ID (e.g. STU-2026-001, FAC-2026-001, BAT-2026-001)
+  memberType: 'student' | 'faculty' | 'batch';
+  name: string;
+  memberRefId: string;
+  assignedAt: string;
+}
+
 export interface Teacher {
   id: string;
+  facultyId?: string; // Custom Admin-Assigned Unique Identifier
+  firstName?: string;
+  lastName?: string;
+  dob?: string;
   name: string;
   email: string;
   phone: string;
@@ -38,6 +91,7 @@ export interface Teacher {
 
 export interface Batch {
   id: string;
+  batchCode?: string; // Custom Admin-Assigned Unique Identifier (e.g. BAT-2026-001)
   name: string;
   courseName: string;
   grade: string;

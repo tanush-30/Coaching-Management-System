@@ -15,11 +15,30 @@ import {
 } from 'lucide-react';
 import { INITIAL_BATCHES, INITIAL_TEACHERS } from '@/lib/mock-data';
 
+const DEFAULT_BLUEPRINT_BATCH = {
+  id: 'blueprint-batch-1',
+  name: 'Standard Coaching Course',
+  courseName: 'Academic Foundation Course',
+  grade: 'Class 10 - 12',
+  subject: 'Physics, Chemistry, Maths / Biology',
+  teacherId: 'faculty-1',
+  teacherName: 'Senior Faculty',
+  scheduleDays: ['Mon', 'Wed', 'Fri'],
+  startTime: '04:00 PM',
+  endTime: '06:30 PM',
+  room: 'Main Lecture Hall',
+  capacity: 35,
+  enrolledCount: 0,
+  annualFee: 60000,
+  accentColor: '#4f46e5',
+  academicYear: '2026-2027',
+};
+
 export const EntityStructureMapper: React.FC = () => {
-  const [selectedBatchId, setSelectedBatchId] = useState<string>(INITIAL_BATCHES[0].id);
+  const [selectedBatchId, setSelectedBatchId] = useState<string>(INITIAL_BATCHES[0]?.id || DEFAULT_BLUEPRINT_BATCH.id);
   const [activeTab, setActiveTab] = useState<'batches' | 'fees' | 'roles'>('batches');
 
-  const selectedBatch = INITIAL_BATCHES.find(b => b.id === selectedBatchId) || INITIAL_BATCHES[0];
+  const selectedBatch = INITIAL_BATCHES.find(b => b.id === selectedBatchId) || INITIAL_BATCHES[0] || DEFAULT_BLUEPRINT_BATCH;
 
   return (
     <div className="space-y-6">

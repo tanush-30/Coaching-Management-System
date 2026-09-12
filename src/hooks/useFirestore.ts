@@ -64,20 +64,41 @@ export function useAddStudent() {
       }
     ) => {
       const { installmentPlan, ...studentData } = payload;
+      const normalizedRollNo = (studentData.rollNo || `STU-2026-${Date.now().toString().slice(-4)}`).trim().toUpperCase();
       const id = crypto.randomUUID();
 
-      // Write student
-      await setDoc(doc(db, 'students', id), {
-        ...studentData,
-        id,
-        createdAt: serverTimestamp(),
+      // Transactional check on member_ids to ensure global ID uniqueness
+      await runTransaction(db, async (txn) => {
+        const idRef = doc(db, 'member_ids', normalizedRollNo);
+        const idSnap = await txn.get(idRef);
+        if (idSnap.exists()) {
+          const data = idSnap.data();
+          throw new Error(`Enrollment ID "${normalizedRollNo}" is already in use by a ${data.memberType} (${data.name}).`);
+        }
+
+        txn.set(idRef, {
+          id: normalizedRollNo,
+          memberType: 'student',
+          name: studentData.name,
+          memberRefId: id,
+          assignedAt: new Date().toISOString(),
+        });
+
+        const studentRef = doc(db, 'students', id);
+        txn.set(studentRef, {
+          ...studentData,
+          id,
+          rollNo: normalizedRollNo,
+          avatar: studentData.avatar || '',
+          createdAt: serverTimestamp(),
+        });
       });
 
       // Write installments if plan provided
       if (installmentPlan && installmentPlan.count > 0) {
         for (let i = 0; i < installmentPlan.amounts.length; i++) {
           const instId = crypto.randomUUID();
-          await setDoc(doc(db, 'fee_installments', instId), {
+          await setDoc(doc(db, 'installments', instId), {
             id: instId,
             studentId: id,
             installmentNo: i + 1,
@@ -95,7 +116,7 @@ export function useAddStudent() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['students'] });
-      qc.invalidateQueries({ queryKey: ['fee_installments'] });
+      qc.invalidateQueries({ queryKey: ['installments'] });
     },
   });
 }
@@ -118,14 +139,14 @@ export function useDeleteStudent() {
       await deleteDoc(doc(db, 'students', studentId));
 
       // Delete related fee installments
-      const instSnap = await getDocs(collection(db, 'fee_installments'));
+      const instSnap = await getDocs(collection(db, 'installments'));
       for (const d of instSnap.docs) {
         if (d.data().studentId === studentId) await deleteDoc(d.ref);
       }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['students'] });
-      qc.invalidateQueries({ queryKey: ['fee_installments'] });
+      qc.invalidateQueries({ queryKey: ['installments'] });
     },
   });
 }
@@ -145,14 +166,36 @@ export function useBatches() {
 export function useAddBatch() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (batchData: Omit<Batch, 'id' | 'enrolledCount'>) => {
+    mutationFn: async (batchData: Omit<Batch, 'id' | 'enrolledCount'> & { batchCode?: string }) => {
+      const normalizedBatchCode = (batchData.batchCode || `BAT-2026-${Date.now().toString().slice(-4)}`).trim().toUpperCase();
       const id = crypto.randomUUID();
-      await setDoc(doc(db, 'batches', id), {
-        ...batchData,
-        id,
-        enrolledCount: 0,
-        createdAt: serverTimestamp(),
+
+      await runTransaction(db, async (txn) => {
+        const idRef = doc(db, 'member_ids', normalizedBatchCode);
+        const idSnap = await txn.get(idRef);
+        if (idSnap.exists()) {
+          const data = idSnap.data();
+          throw new Error(`Batch UID "${normalizedBatchCode}" is already in use by a ${data.memberType} (${data.name}).`);
+        }
+
+        txn.set(idRef, {
+          id: normalizedBatchCode,
+          memberType: 'batch',
+          name: batchData.name,
+          memberRefId: id,
+          assignedAt: new Date().toISOString(),
+        });
+
+        const batchRef = doc(db, 'batches', id);
+        txn.set(batchRef, {
+          ...batchData,
+          id,
+          batchCode: normalizedBatchCode,
+          enrolledCount: 0,
+          createdAt: serverTimestamp(),
+        });
       });
+
       return id;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['batches'] }),
@@ -173,7 +216,18 @@ export function useDeleteBatch() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (batchId: string) => {
-      await deleteDoc(doc(db, 'batches', batchId));
+      const batchRef = doc(db, 'batches', batchId);
+      await runTransaction(db, async (txn) => {
+        const snap = await txn.get(batchRef);
+        if (snap.exists()) {
+          const batchData = snap.data();
+          if (batchData?.batchCode) {
+            const idRef = doc(db, 'member_ids', batchData.batchCode);
+            txn.delete(idRef);
+          }
+          txn.delete(batchRef);
+        }
+      });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['batches'] }),
   });
@@ -191,13 +245,72 @@ export function useTeachers() {
   });
 }
 
+export function useAddTeacher() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (teacher: Omit<Teacher, 'id'> & { facultyId?: string }) => {
+      const normalizedFacultyId = (teacher.facultyId || `FAC-2026-${Date.now().toString().slice(-4)}`).trim().toUpperCase();
+      const id = crypto.randomUUID();
+
+      await runTransaction(db, async (txn) => {
+        const idRef = doc(db, 'member_ids', normalizedFacultyId);
+        const idSnap = await txn.get(idRef);
+        if (idSnap.exists()) {
+          const data = idSnap.data();
+          throw new Error(`Faculty Member ID "${normalizedFacultyId}" is already in use by a ${data.memberType} (${data.name}).`);
+        }
+
+        txn.set(idRef, {
+          id: normalizedFacultyId,
+          memberType: 'faculty',
+          name: teacher.name,
+          memberRefId: id,
+          assignedAt: new Date().toISOString(),
+        });
+
+        const teacherRef = doc(db, 'teachers', id);
+        txn.set(teacherRef, {
+          ...teacher,
+          id,
+          facultyId: normalizedFacultyId,
+          avatar: teacher.avatar || '',
+          createdAt: serverTimestamp(),
+        });
+      });
+
+      return id;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['teachers'] }),
+  });
+}
+
+export function useUpdateTeacher() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, updates }: { id: string; updates: Partial<Teacher> }) => {
+      await updateDoc(doc(db, 'teachers', id), updates);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['teachers'] }),
+  });
+}
+
+export function useDeleteTeacher() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await deleteDoc(doc(db, 'teachers', id));
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['teachers'] }),
+  });
+}
+
 // ── FEE INSTALLMENTS ──────────────────────────────────────────────────────────
 
 export function useFeeInstallments() {
   return useQuery<FeeInstallment[]>({
-    queryKey: ['fee_installments'],
+    queryKey: ['installments'],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'fee_installments'));
+      const snap = await getDocs(collection(db, 'installments'));
       return snap.docs.map(d => ({ id: d.id, ...d.data() }) as FeeInstallment);
     },
   });
@@ -215,7 +328,7 @@ export function useRecordPayment() {
       paymentMode: FeeInstallment['paymentMode'];
       transactionId?: string;
     }) => {
-      const instRef = doc(db, 'fee_installments', installmentId);
+      const instRef = doc(db, 'installments', installmentId);
 
       // Atomic transaction — prevents double payment race condition
       await runTransaction(db, async (tx) => {
@@ -250,7 +363,7 @@ export function useRecordPayment() {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['fee_installments'] });
+      qc.invalidateQueries({ queryKey: ['installments'] });
       qc.invalidateQueries({ queryKey: ['students'] });
       qc.invalidateQueries({ queryKey: ['whatsapp_logs'] });
     },
@@ -264,7 +377,7 @@ export function useAttendance() {
     queryKey: ['attendance'],
     queryFn: async () => {
       const snap = await getDocs(
-        query(collection(db, 'batch_attendance'), orderBy('date', 'desc'))
+        query(collection(db, 'attendance'), orderBy('date', 'desc'))
       );
       return snap.docs.map(d => ({ id: d.id, ...d.data() }) as BatchAttendance);
     },
@@ -296,7 +409,7 @@ export function useMarkAttendance() {
       const id = crypto.randomUUID();
       const markedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-      await setDoc(doc(db, 'batch_attendance', id), {
+      await setDoc(doc(db, 'attendance', id), {
         id,
         batchId,
         batchName,
@@ -351,7 +464,7 @@ export function useMarks() {
   return useQuery<StudentExamMark[]>({
     queryKey: ['marks'],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'student_exam_marks'));
+      const snap = await getDocs(collection(db, 'marks'));
       return snap.docs.map(d => ({ id: d.id, ...d.data() }) as StudentExamMark);
     },
   });
@@ -393,7 +506,7 @@ export function useSaveExamMarks() {
         else if (percentage >= 40) grade = 'C';
 
         const markId = `mark-${examId}-${entry.studentId}`;
-        await setDoc(doc(db, 'student_exam_marks', markId), {
+        await setDoc(doc(db, 'marks', markId), {
           id: markId,
           examId,
           studentId: entry.studentId,
@@ -462,9 +575,9 @@ export function useAddHomework() {
 
 export function useStudyMaterials() {
   return useQuery<StudyMaterial[]>({
-    queryKey: ['study_materials'],
+    queryKey: ['materials'],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'study_materials'));
+      const snap = await getDocs(collection(db, 'materials'));
       return snap.docs.map(d => ({ id: d.id, ...d.data() }) as StudyMaterial);
     },
   });

@@ -79,7 +79,7 @@ export const FeeManagement: React.FC<FeeManagementProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Phase 1: Foundation Module</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Fee Invoicing & Ledger Control</span>
             <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-bold">Live Billing & Invoicing</span>
           </div>
           <h2 className="text-xl font-bold text-slate-900 mt-1">Fee Management & Digital Receipts</h2>

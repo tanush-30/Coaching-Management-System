@@ -302,3 +302,172 @@ export const generateReportCardPDF = (
 
   doc.save(`ReportCard_${student.rollNo}_${exam.id}.pdf`);
 };
+
+export interface AttendancePDFRecord {
+  date: string;
+  status: 'present' | 'absent' | 'late';
+  batchName?: string;
+  remarks?: string;
+}
+
+export interface AttendancePDFStats {
+  percentage: number;
+  totalConducted: number;
+  presentCount: number;
+  absentCount: number;
+  lateCount: number;
+}
+
+export const generateStudentAttendancePDF = (
+  student: Student,
+  batchName: string,
+  records: AttendancePDFRecord[],
+  stats: AttendancePDFStats
+) => {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  // Header Banner
+  doc.setFillColor(15, 23, 42); // Slate 900
+  doc.rect(0, 0, 210, 36, 'F');
+
+  // Academy Name & Header
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(20);
+  doc.setFont('helvetica', 'bold');
+  doc.text('APEX ACADEMY OF EXCELLENCE', 14, 16);
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Official Student Attendance Ledger & Presence Certificate', 14, 23);
+  doc.text('Helpline: +91 98765 00000 | attendance@apexacademy.edu | Session: 2026-2027', 14, 29);
+
+  // Document Title
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.text('STUDENT ATTENDANCE REPORT', 14, 46);
+
+  // Student Information Box
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(14, 52, 182, 28, 2, 2, 'F');
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(14, 52, 182, 28, 2, 2, 'S');
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(51, 65, 85);
+  doc.text('Student Name:', 18, 60);
+  doc.text('Roll / User ID:', 18, 67);
+  doc.text('Enrolled Program:', 18, 74);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(15, 23, 42);
+  doc.text(student.name, 48, 60);
+  doc.text(student.rollNo, 48, 67);
+  doc.text(batchName || 'General Program', 48, 74);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(51, 65, 85);
+  doc.text('Parent Contact:', 120, 60);
+  doc.text('Generated On:', 120, 67);
+  doc.text('Current Standing:', 120, 74);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(15, 23, 42);
+  doc.text(student.parentPhone || student.phone || 'N/A', 152, 60);
+  doc.text(new Date().toISOString().split('T')[0], 152, 67);
+  doc.text(stats.percentage >= 75 ? 'ELIGIBLE (>= 75%)' : 'ATTENDANCE ALERT (< 75%)', 152, 74);
+
+  // Attendance Metric Summary Cards in PDF
+  const cardY = 85;
+  const cardW = 34;
+  const cardH = 18;
+
+  const metrics = [
+    { label: 'Overall Rate', val: `${stats.percentage}%`, fill: [243, 232, 255], text: [126, 34, 206] },
+    { label: 'Conducted', val: `${stats.totalConducted}`, fill: [241, 245, 249], text: [30, 41, 59] },
+    { label: 'Present Days', val: `${stats.presentCount}`, fill: [236, 253, 245], text: [5, 150, 105] },
+    { label: 'Absent Days', val: `${stats.absentCount}`, fill: [255, 241, 242], text: [225, 29, 72] },
+    { label: 'Late Days', val: `${stats.lateCount}`, fill: [254, 243, 199], text: [217, 119, 6] },
+  ];
+
+  metrics.forEach((m, idx) => {
+    const x = 14 + idx * (cardW + 3);
+    doc.setFillColor(m.fill[0], m.fill[1], m.fill[2]);
+    doc.roundedRect(x, cardY, cardW, cardH, 2, 2, 'F');
+
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    doc.text(m.label, x + cardW / 2, cardY + 6, { align: 'center' });
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(m.text[0], m.text[1], m.text[2]);
+    doc.text(m.val, x + cardW / 2, cardY + 14, { align: 'center' });
+  });
+
+  // Tabular Date-wise Records
+  const tableRows = records.map((r, i) => [
+    (i + 1).toString(),
+    r.date,
+    r.batchName || batchName || 'Class Session',
+    r.status.toUpperCase(),
+    r.remarks || 'Standard Session',
+  ]);
+
+  doc.autoTable({
+    startY: 110,
+    head: [['#', 'Date', 'Class / Batch', 'Status', 'Remarks / Session Notes']],
+    body: tableRows.length > 0 ? tableRows : [['-', 'No attendance history recorded yet.', '-', '-', '-']],
+    theme: 'striped',
+    headStyles: {
+      fillColor: [124, 58, 237], // Violet 600
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8.5,
+    },
+    styles: {
+      fontSize: 8,
+      cellPadding: 3.5,
+    },
+    columnStyles: {
+      0: { cellWidth: 10 },
+      1: { cellWidth: 25 },
+      2: { cellWidth: 55 },
+      3: { cellWidth: 25, fontStyle: 'bold' },
+      4: { cellWidth: 67 },
+    },
+    didParseCell: function (data) {
+      if (data.section === 'body' && data.column.index === 3) {
+        const val = String(data.cell.raw).toUpperCase();
+        if (val === 'PRESENT') {
+          data.cell.styles.textColor = [5, 150, 105]; // emerald
+        } else if (val === 'ABSENT') {
+          data.cell.styles.textColor = [225, 29, 72]; // rose
+        } else if (val === 'LATE') {
+          data.cell.styles.textColor = [217, 119, 6]; // amber
+        }
+      }
+    },
+  });
+
+  const finalY = Math.min(doc.lastAutoTable.finalY + 15, 250);
+
+  // Verification Seal / Signatures
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Head of Academics & Attendance', 25, finalY + 15);
+  doc.text('Parent / Guardian Acknowledgement', 125, finalY + 15);
+
+  doc.setDrawColor(203, 213, 225);
+  doc.line(20, finalY + 10, 75, finalY + 10);
+  doc.line(120, finalY + 10, 185, finalY + 10);
+
+  doc.save(`Attendance_${student.rollNo}_${new Date().toISOString().split('T')[0]}.pdf`);
+};
+

@@ -1,361 +1,188 @@
 'use client';
 
-// Force dynamic rendering — this page uses Firebase Auth (phone OTP + email login)
-// Firebase Client SDK is browser-only and cannot run during static generation
-export const dynamic = 'force-dynamic';
+import React from 'react';
+import Link from 'next/link';
+import { 
+  GraduationCap, 
+  ShieldCheck, 
+  Users, 
+  UserCheck, 
+  ArrowRight, 
+  ArrowLeft,
+  Lock,
+  Sparkles,
+  BookOpen
+} from 'lucide-react';
+import { UserRole } from '@/lib/types';
 
-import React, { useState } from 'react';
-import {
-  signInWithEmailAndPassword,
-  signInWithPhoneNumber,
-  RecaptchaVerifier,
-  ConfirmationResult,
-} from 'firebase/auth';
-import { auth, isFirebaseConfigured } from '@/lib/firebase';
-import { GraduationCap, Mail, Phone, Lock, ArrowRight, Loader2, Eye, EyeOff, KeyRound, Sparkles } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-
-type LoginMode = 'email' | 'phone';
-type PhoneStep = 'enter_phone' | 'enter_otp';
-
-declare global {
-  interface Window {
-    recaptchaVerifier?: RecaptchaVerifier;
-  }
+interface RoleOption {
+  role: UserRole;
+  title: string;
+  tagline: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  badge: string;
+  badgeColor: string;
+  gradient: string;
+  buttonLabel: string;
+  href: string;
 }
 
-export default function LoginPage() {
-  const router = useRouter();
-  const [mode, setMode] = useState<LoginMode>('email');
-  const [phoneStep, setPhoneStep] = useState<PhoneStep>('enter_phone');
-  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+const roleOptions: RoleOption[] = [
+  {
+    role: 'admin',
+    title: 'Super Admin / Director',
+    tagline: 'Institute Management & Leadership',
+    description: 'Complete operational command: admissions, batch allocation, fee collection, staff management & WhatsApp broadcasts.',
+    icon: ShieldCheck,
+    badge: 'Full Access',
+    badgeColor: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+    gradient: 'from-indigo-600 via-indigo-700 to-blue-700',
+    buttonLabel: 'Enter as Admin',
+    href: '/login/admin',
+  },
+  {
+    role: 'teacher',
+    title: 'Faculty / Teacher',
+    tagline: 'Academic Command Center',
+    description: 'Dedicated batch roster, one-tap biometric attendance register, test mark entries & daily homework assignments.',
+    icon: Users,
+    badge: 'Faculty Portal',
+    badgeColor: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    gradient: 'from-emerald-600 via-teal-600 to-green-700',
+    buttonLabel: 'Enter as Teacher',
+    href: '/login/teacher',
+  },
+  {
+    role: 'student',
+    title: 'Student Portal',
+    tagline: 'Personal Study Dashboard',
+    description: 'Track your attendance records, study notes, pending homework, unit test scores & batch percentile ranks.',
+    icon: GraduationCap,
+    badge: 'Student App',
+    badgeColor: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
+    gradient: 'from-violet-600 via-purple-600 to-indigo-700',
+    buttonLabel: 'Enter as Student',
+    href: '/login/student',
+  },
+  {
+    role: 'parent',
+    title: 'Parent / Guardian',
+    tagline: 'Ward Progress & Fee Receipts',
+    description: 'Monitor daily attendance alerts, download official fee receipts, check test scorecards & communicate with faculty.',
+    icon: UserCheck,
+    badge: 'Parent View',
+    badgeColor: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+    gradient: 'from-amber-600 via-orange-600 to-rose-600',
+    buttonLabel: 'Enter as Parent',
+    href: '/login/parent',
+  },
+];
 
-  // Email fields
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-
-  // Phone fields
-  const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
-
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  // --- Demo / Dev Login Handler (Instant bypass when Firebase keys aren't configured yet) ---
-  const handleDemoLogin = () => {
-    document.cookie = 'apex_session=demo-admin-session; path=/; max-age=86400; SameSite=Strict';
-    router.replace('/');
-  };
-
-  // --- Email/Password Login ---
-  const handleEmailLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-
-    if (!isFirebaseConfigured) {
-      // If Firebase credentials are not yet configured in .env.local, log in via Demo Mode
-      handleDemoLogin();
-      return;
-    }
-
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-      router.replace('/');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Login failed';
-      if (msg.includes('user-not-found') || msg.includes('wrong-password') || msg.includes('invalid-credential')) {
-        setError('Invalid email or password. Please try again.');
-      } else {
-        setError(msg);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // --- Phone OTP: Step 1 — Send OTP ---
-  const handleSendOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-
-    if (!isFirebaseConfigured) {
-      // In local dev mode without Firebase credentials, simulate OTP dispatch
-      setTimeout(() => {
-        setIsLoading(false);
-        setPhoneStep('enter_otp');
-        setOtp('123456'); // pre-fill demo OTP for quick testing
-      }, 600);
-      return;
-    }
-
-    try {
-      if (!window.recaptchaVerifier) {
-        window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-          size: 'invisible',
-        });
-      }
-      const formattedPhone = phone.startsWith('+') ? phone : `+91${phone}`;
-      const result = await signInWithPhoneNumber(auth, formattedPhone, window.recaptchaVerifier);
-      setConfirmationResult(result);
-      setPhoneStep('enter_otp');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to send OTP';
-      setError(msg);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // --- Phone OTP: Step 2 — Verify OTP ---
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-
-    if (!isFirebaseConfigured) {
-      // Local dev mode verification
-      setTimeout(() => {
-        handleDemoLogin();
-      }, 500);
-      return;
-    }
-
-    if (!confirmationResult) {
-      setIsLoading(false);
-      return;
-    }
-
-    try {
-      await confirmationResult.confirm(otp);
-      router.replace('/');
-    } catch {
-      setError('Invalid OTP. Please check and try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+export default function RoleSelectorPage() {
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-      {/* Background gradient blobs */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-sky-600/15 rounded-full blur-3xl" />
-      </div>
+    <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-between antialiased selection:bg-indigo-500 selection:text-white relative overflow-hidden">
+      {/* Dynamic Background Glows */}
+      <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-600/15 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-sky-600/15 rounded-full blur-[120px] pointer-events-none" />
 
-      {/* Invisible reCAPTCHA container (required for phone OTP) */}
-      <div id="recaptcha-container" />
-
-      <div className="relative w-full max-w-md">
-        {/* Card */}
-        <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/60 rounded-3xl p-8 shadow-2xl">
-
-          {/* Logo */}
-          <div className="flex flex-col items-center gap-3 mb-8">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-700 via-indigo-600 to-sky-500 flex items-center justify-center shadow-lg shadow-indigo-600/30">
-              <GraduationCap className="w-7 h-7 text-white" />
+      {/* Header */}
+      <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-xl relative z-10">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2.5 group">
+            <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-600 to-sky-500 flex items-center justify-center text-white font-extrabold shadow-md shadow-indigo-600/20 group-hover:scale-105 transition-transform">
+              🎓
             </div>
-            <div className="text-center">
-              <h1 className="text-2xl font-extrabold text-white tracking-tight">ApexERP</h1>
-              <p className="text-sm text-slate-400 mt-0.5">Coaching Management System</p>
-            </div>
-          </div>
-
-          {/* Mode Switcher */}
-          <div className="flex p-1 bg-slate-800 rounded-xl mb-6 text-sm font-semibold">
-            <button
-              onClick={() => { setMode('email'); setError(''); }}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${
-                mode === 'email'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Mail className="w-4 h-4" />
-              Email
-            </button>
-            <button
-              onClick={() => { setMode('phone'); setPhoneStep('enter_phone'); setError(''); }}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${
-                mode === 'phone'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Phone className="w-4 h-4" />
-              Phone OTP
-            </button>
-          </div>
-
-          {/* Dev Mode / Firebase Not Configured Banner */}
-          {!isFirebaseConfigured && (
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 mb-6 text-left">
-              <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider mb-1">
-                <Sparkles className="w-4 h-4" />
-                Local Dev Preview Mode
-              </div>
-              <p className="text-xs text-slate-300 leading-relaxed mb-3">
-                Firebase keys are not configured in <code className="text-amber-300 bg-amber-950/50 px-1 py-0.5 rounded">.env.local</code>. You can explore the full ERP with mock data immediately!
-              </p>
-              <button
-                type="button"
-                onClick={handleDemoLogin}
-                className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all active:scale-[0.98]"
-              >
-                <KeyRound className="w-3.5 h-3.5" />
-                Enter Dashboard (Demo Admin)
-              </button>
-            </div>
-          )}
-
-          {/* Error Banner */}
-          {error && (
-            <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl px-4 py-3 text-sm mb-5 animate-fade-in">
-              {error}
-            </div>
-          )}
-
-          {/* EMAIL FORM */}
-          {mode === 'email' && (
-            <form onSubmit={handleEmailLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="admin@apexacademy.edu"
-                    className="w-full bg-slate-800 border border-slate-700 text-white placeholder-slate-500 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
-                  Password
-                </label>
-                <div className="relative">
-                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full bg-slate-800 border border-slate-700 text-white placeholder-slate-500 rounded-xl pl-10 pr-10 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(p => !p)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full mt-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 transition-all active:scale-[0.98]"
-              >
-                {isLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <>Sign In <ArrowRight className="w-4 h-4" /></>
-                )}
-              </button>
-            </form>
-          )}
-
-          {/* PHONE OTP FORM */}
-          {mode === 'phone' && (
             <div>
-              {phoneStep === 'enter_phone' ? (
-                <form onSubmit={handleSendOtp} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
-                      Mobile Number
-                    </label>
-                    <div className="relative flex">
-                      <span className="flex items-center px-3.5 bg-slate-700 border border-r-0 border-slate-600 rounded-l-xl text-slate-300 text-sm font-bold">
-                        +91
-                      </span>
-                      <input
-                        type="tel"
-                        required
-                        maxLength={10}
-                        value={phone}
-                        onChange={e => setPhone(e.target.value.replace(/\D/g, ''))}
-                        placeholder="98765 00000"
-                        className="flex-1 bg-slate-800 border border-slate-700 text-white placeholder-slate-500 rounded-r-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
-                      />
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1.5">An OTP will be sent to this number via SMS</p>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={isLoading || phone.length < 10}
-                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 transition-all active:scale-[0.98]"
-                  >
-                    {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Send OTP <ArrowRight className="w-4 h-4" /></>}
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={handleVerifyOtp} className="space-y-4">
-                  <div className="text-center mb-2">
-                    <p className="text-sm text-slate-400">OTP sent to <span className="text-white font-bold">+91 {phone}</span></p>
-                    <button
-                      type="button"
-                      onClick={() => { setPhoneStep('enter_phone'); setOtp(''); setError(''); }}
-                      className="text-xs text-indigo-400 hover:text-indigo-300 mt-1 underline"
-                    >
-                      Change number
-                    </button>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
-                      Enter 6-digit OTP
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      maxLength={6}
-                      value={otp}
-                      onChange={e => setOtp(e.target.value.replace(/\D/g, ''))}
-                      placeholder="• • • • • •"
-                      className="w-full bg-slate-800 border border-slate-700 text-white placeholder-slate-500 rounded-xl px-4 py-3 text-sm text-center tracking-[0.5em] font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={isLoading || otp.length < 6}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 transition-all active:scale-[0.98]"
-                  >
-                    {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Verify & Sign In <ArrowRight className="w-4 h-4" /></>}
-                  </button>
-                </form>
-              )}
+              <span className="font-extrabold text-lg tracking-tight text-white">
+                Apex<span className="text-indigo-400">ERP</span>
+              </span>
+              <span className="hidden sm:inline-block ml-2 text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                Coaching OS
+              </span>
             </div>
-          )}
+          </Link>
 
-          {/* Footer note */}
-          <p className="text-center text-xs text-slate-600 mt-6">
-            Apex Academy of Excellence · Secure ERP Portal
+          <Link
+            href="/"
+            className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 transition-colors"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Back to Home</span>
+          </Link>
+        </div>
+      </header>
+
+      {/* Main Role Selection Area */}
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-12 sm:py-16 relative z-10 w-full">
+        <div className="text-center space-y-3 mb-10 sm:mb-12">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-bold">
+            <Lock className="w-3.5 h-3.5" />
+            <span>Role-Gated Portal Entry</span>
+          </div>
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-white">
+            Select Your Account Portal
+          </h1>
+          <p className="text-sm sm:text-base text-slate-400 max-w-xl mx-auto">
+            Choose your designated institutional role to access your dedicated, secure workspace.
           </p>
         </div>
-      </div>
+
+        {/* 4 Role Doorway Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
+          {roleOptions.map((opt) => {
+            const Icon = opt.icon;
+            return (
+              <div
+                key={opt.role}
+                className="group relative bg-slate-900/70 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-3xl p-6 sm:p-7 backdrop-blur-xl shadow-xl hover:shadow-2xl transition-all duration-300 flex flex-col justify-between hover:scale-[1.01]"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className={`w-12 h-12 rounded-2xl bg-gradient-to-tr ${opt.gradient} flex items-center justify-center text-white shadow-lg`}>
+                      <Icon className="w-6 h-6" />
+                    </div>
+                    <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${opt.badgeColor}`}>
+                      {opt.badge}
+                    </span>
+                  </div>
+
+                  <h2 className="text-xl font-bold text-white tracking-tight group-hover:text-indigo-300 transition-colors">
+                    {opt.title}
+                  </h2>
+                  <div className="text-xs font-semibold text-slate-400 mt-0.5">
+                    {opt.tagline}
+                  </div>
+                  <p className="text-xs sm:text-sm text-slate-400 mt-3 leading-relaxed">
+                    {opt.description}
+                  </p>
+                </div>
+
+                <div className="pt-6 mt-4 border-t border-slate-800/80">
+                  <Link
+                    href={opt.href}
+                    className={`w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r ${opt.gradient} hover:opacity-95 text-white text-xs sm:text-sm font-bold shadow-md flex items-center justify-center gap-2 group/btn transition-all active:scale-[0.99]`}
+                  >
+                    <span>{opt.buttonLabel}</span>
+                    <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-1 transition-transform" />
+                  </Link>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Security Notice */}
+        <div className="mt-10 p-4 rounded-2xl bg-slate-900/40 border border-slate-800/60 text-center text-xs text-slate-500 max-w-2xl mx-auto flex items-center justify-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+          <span>Strict Server-Side RBAC Enforcement: Credentials are authenticated strictly for the selected portal.</span>
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-slate-900 py-6 text-center text-xs text-slate-600 relative z-10">
+        © {new Date().getFullYear()} ApexERP Platform · 256-Bit SSL Encrypted
+      </footer>
     </div>
   );
 }

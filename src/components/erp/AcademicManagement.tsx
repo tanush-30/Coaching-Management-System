@@ -57,7 +57,7 @@ export const AcademicManagement: React.FC<AcademicManagementProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Phase 3: Academics & Performance Engine</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Academics & Examination Engine</span>
             <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold">
               Automated PDF Report Cards
             </span>

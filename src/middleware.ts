@@ -1,42 +1,127 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import type { UserRole } from '@/lib/types';
 
-// Public routes that don't require authentication
-const PUBLIC_ROUTES = ['/login'];
+// Public routes that do not require authentication
+const PUBLIC_PREFIXES = ['/login', '/privacy', '/terms'];
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow public routes through
-  if (PUBLIC_ROUTES.some(route => pathname.startsWith(route))) {
+  // 1. Allow public landing page (root) and public routes through
+  if (pathname === '/' || PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     return NextResponse.next();
   }
 
-  // Allow Next.js internals and static files through
+  // 2. Allow Next.js internals, API endpoints, and static files
   if (
     pathname.startsWith('/_next') ||
-    pathname.startsWith('/api/auth') ||
+    pathname.startsWith('/api') ||
     pathname.includes('.')
   ) {
     return NextResponse.next();
   }
 
-  // Check for Firebase session cookie (set by the client after login)
-  // Firebase Web SDK stores the token in IndexedDB — for middleware-level protection
-  // we use a session cookie that the client sets after auth state confirms login.
-  const sessionCookie = request.cookies.get('apex_session');
+  // 3. Read session cookie (check both 'session' and 'apex_session')
+  const sessionCookie =
+    request.cookies.get('session')?.value ||
+    request.cookies.get('apex_session')?.value;
 
-  if (!sessionCookie?.value) {
-    // Redirect unauthenticated users to login
-    const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('from', pathname);
+  // Determine target role from route prefix if accessing role portal
+  const isTargetAdmin = pathname.startsWith('/admin');
+  const isTargetTeacher = pathname.startsWith('/teacher');
+  const isTargetStudent = pathname.startsWith('/student');
+  const isTargetParent = pathname.startsWith('/parent');
+  const isAppGateway = pathname === '/app' || pathname === '/app/';
+
+  const fallbackLoginPath = isTargetAdmin
+    ? '/login/admin'
+    : isTargetTeacher
+    ? '/login/teacher'
+    : isTargetStudent
+    ? '/login/student'
+    : isTargetParent
+    ? '/login/parent'
+    : '/login';
+
+  // 4. If no session cookie exists, redirect immediately to the appropriate login portal
+  if (!sessionCookie) {
+    const loginUrl = new URL(fallbackLoginPath, request.url);
+    loginUrl.searchParams.set('redirect', pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  // 5. Server-Side Verification: Middleware calls internal Node-runtime verification route
+  try {
+    const verifyUrl = new URL('/api/auth/verify', request.url);
+    const verifyRes = await fetch(verifyUrl, {
+      headers: {
+        Cookie: `session=${sessionCookie}; apex_session=${sessionCookie}`,
+      },
+      cache: 'no-store',
+    });
+
+    if (!verifyRes.ok) {
+      const loginUrl = new URL(fallbackLoginPath, request.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      loginUrl.searchParams.set('error', 'session_expired');
+      return NextResponse.redirect(loginUrl);
+    }
+
+    const data = await verifyRes.json();
+    const userRole = (data.role as UserRole) || null;
+
+    if (!userRole) {
+      return NextResponse.redirect(new URL(fallbackLoginPath, request.url));
+    }
+
+    // 6. Gateway Route (/app) -> redirect to assigned role dashboard
+    if (isAppGateway) {
+      const targetDashboard =
+        userRole === 'teacher'
+          ? '/teacher'
+          : userRole === 'student'
+          ? '/student'
+          : userRole === 'parent'
+          ? '/parent'
+          : '/admin';
+      return NextResponse.redirect(new URL(targetDashboard, request.url));
+    }
+
+    // 7. Strict Admin Route Gating: Must have verified custom claim `role: 'admin'`
+    if (isTargetAdmin) {
+      if (userRole !== 'admin') {
+        const unauthorizedUrl = new URL('/login/admin', request.url);
+        unauthorizedUrl.searchParams.set('error', 'unauthorized');
+        return NextResponse.redirect(unauthorizedUrl);
+      }
+      return NextResponse.next();
+    }
+
+    // 8. Role-Based Route Gating for other portals (Admin has super-access)
+    if (userRole === 'admin') {
+      return NextResponse.next();
+    }
+
+    if (isTargetTeacher && userRole !== 'teacher') {
+      return NextResponse.redirect(new URL(`/${userRole}`, request.url));
+    }
+
+    if (isTargetStudent && userRole !== 'student') {
+      return NextResponse.redirect(new URL(`/${userRole}`, request.url));
+    }
+
+    if (isTargetParent && userRole !== 'parent') {
+      return NextResponse.redirect(new URL(`/${userRole}`, request.url));
+    }
+
+    return NextResponse.next();
+  } catch (err) {
+    console.error('[Middleware] Error verifying session:', err);
+    return NextResponse.redirect(new URL(fallbackLoginPath, request.url));
+  }
 }
 
 export const config = {
-  // Run middleware on all routes except Next.js internals and static files
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };

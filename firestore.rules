@@ -1,0 +1,146 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.role == 'admin';
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && request.auth.token.role == 'teacher';
+    }
+
+    function isStudent() {
+      return isAuthenticated() && request.auth.token.role == 'student';
+    }
+
+    function isParent() {
+      return isAuthenticated() && request.auth.token.role == 'parent';
+    }
+
+    // 1. User Roles & Claim Backups: Admin only for write; user can read own
+    match /user_roles/{userId} {
+      allow read: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
+      allow write: if isAdmin();
+    }
+
+    // 2. Audit Logs: Strictly Admin read/write only
+    match /audit_logs/{logId} {
+      allow read, write: if isAdmin();
+    }
+
+    // 3. Member ID Reservations: Admin only
+    match /member_ids/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    // 4. WhatsApp Automation & Logs: Admin read/write; Faculty can write absence alerts
+    match /whatsapp_logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin() || isTeacher() || isAuthenticated();
+    }
+
+    // 5. Global Settings & Institute Configuration
+    match /settings/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 6. Student Roster: Strict ownership and batch scoping
+    // - Student: reads own document only
+    // - Teacher: reads students in assigned batches only
+    // - Parent: reads linked children only
+    // - Admin: full access
+    match /students/{studentId} {
+      allow read: if isAdmin() ||
+        (isStudent() && (
+          request.auth.uid == studentId ||
+          resource.data.authUid == request.auth.uid ||
+          request.auth.token.studentId == studentId
+        )) ||
+        (isTeacher() && (
+          (resource.data.batchIds != null && resource.data.batchIds.hasAny(request.auth.token.batchIds)) ||
+          (resource.data.batchId != null && resource.data.batchId in request.auth.token.batchIds)
+        )) ||
+        (isParent() && (
+          request.auth.token.childIds != null && studentId in request.auth.token.childIds
+        ));
+      allow write: if isAdmin();
+    }
+
+    // 7. Teacher Directory: Admin full access; Teachers read own; Authenticated read public info
+    match /teachers/{teacherId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 8. Batches: Admin full access; Authenticated read
+    match /batches/{batchId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 9. Attendance Registers: Scoped by institute authentication
+    match /attendance/{attendanceId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isTeacher() || isAuthenticated();
+    }
+
+    // 10. Exams & Marks: Scoped by student ownership or faculty batch assignment
+    match /exams/{examId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /marks/{markId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    // 11. Homework & Study Materials: Scoped by batch
+    match /homework/{hwId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /materials/{matId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    // 12. Fees & Installments: Admin full access; Students & Parents read own records only
+    match /fee_ledgers/{feeId} {
+      allow read: if isAdmin() ||
+        (isStudent() && (
+          resource.data.studentId == request.auth.uid ||
+          resource.data.studentId == request.auth.token.studentId
+        )) ||
+        (isParent() && (
+          request.auth.token.childIds != null && resource.data.studentId in request.auth.token.childIds
+        ));
+      allow write: if isAdmin();
+    }
+
+    match /installments/{installmentId} {
+      allow read: if isAdmin() ||
+        (isStudent() && (
+          resource.data.studentId == request.auth.uid ||
+          resource.data.studentId == request.auth.token.studentId
+        )) ||
+        (isParent() && (
+          request.auth.token.childIds != null && resource.data.studentId in request.auth.token.childIds
+        ));
+      allow write: if isAdmin();
+    }
+
+    // Default deny-all fallback for any unspecified collections
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

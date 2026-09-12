@@ -15,15 +15,14 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Lazy singleton — only initializes in the browser, never during SSR/build
-let _app: FirebaseApp | null = null;
-let _db: Firestore | null = null;
-let _auth: Auth | null = null;
-
 export const isFirebaseConfigured = Boolean(
   firebaseConfig.apiKey &&
   !firebaseConfig.apiKey.includes('your_api_key')
 );
+
+let _app: FirebaseApp | undefined;
+let _db: Firestore | undefined;
+let _auth: Auth | undefined;
 
 function getFirebaseApp(): FirebaseApp {
   if (typeof window === 'undefined') {
@@ -40,19 +39,35 @@ function getFirebaseApp(): FirebaseApp {
   return _app;
 }
 
-// Proxy-based lazy exports — safe to import anywhere; only throws if called server-side
-export const db: Firestore = new Proxy({} as Firestore, {
-  get(_, prop) {
-    if (!_db) _db = getFirestore(getFirebaseApp());
-    return _db[prop as keyof Firestore];
-  },
-});
+// In the browser, initialize singletons immediately so SDK functions (doc, collection, writeBatch) receive real instances
+if (typeof window !== 'undefined' && isFirebaseConfigured) {
+  try {
+    _app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+    _db = getFirestore(_app);
+    _auth = getAuth(_app);
+  } catch (e) {
+    console.warn('[Firebase] Client initialization warning:', e);
+  }
+}
 
-export const auth: Auth = new Proxy({} as Auth, {
-  get(_, prop) {
-    if (!_auth) _auth = getAuth(getFirebaseApp());
-    return _auth[prop as keyof Auth];
-  },
-});
+export const db: Firestore = (_db || ({} as Firestore));
+export const auth: Auth = (_auth || ({} as Auth));
 
-export default { get app() { return getFirebaseApp(); } };
+export function getClientDb(): Firestore {
+  if (!_db) {
+    const app = getFirebaseApp();
+    _db = getFirestore(app);
+  }
+  return _db;
+}
+
+export function getClientAuth(): Auth {
+  if (!_auth) {
+    const app = getFirebaseApp();
+    _auth = getAuth(app);
+  }
+  return _auth;
+}
+
+export default { get app() { return getFirebaseApp(); }, get db() { return getClientDb(); }, get auth() { return getClientAuth(); } };
+

@@ -6,7 +6,9 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "seed": "node scripts/seed-database.mjs",
+    "create-admin": "node scripts/create-admin.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",

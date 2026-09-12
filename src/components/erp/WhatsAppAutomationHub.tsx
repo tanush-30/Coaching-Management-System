@@ -22,7 +22,7 @@ import { Batch, WhatsAppMessage } from '@/lib/types';
 interface WhatsAppAutomationHubProps {
   whatsappLogs: WhatsAppMessage[];
   batches: Batch[];
-  onSendBroadcast: (batchId: string, subjectTitle: string, messageBody: string) => number;
+  onSendBroadcast: (batchId: string, subjectTitle: string, messageBody: string) => Promise<number> | number;
 }
 
 export const WhatsAppAutomationHub: React.FC<WhatsAppAutomationHubProps> = ({
@@ -51,11 +51,11 @@ export const WhatsAppAutomationHub: React.FC<WhatsAppAutomationHubProps> = ({
     return matchesSearch && matchesFilter;
   });
 
-  const handleBroadcastSubmit = (e: React.FormEvent) => {
+  const handleBroadcastSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!broadcastTitle || !broadcastBody) return;
 
-    const count = onSendBroadcast(broadcastBatchId, broadcastTitle, broadcastBody);
+    const count = await onSendBroadcast(broadcastBatchId, broadcastTitle, broadcastBody);
     setBroadcastSentCount(count);
     setBroadcastTitle('');
     setBroadcastBody('');
@@ -72,7 +72,7 @@ export const WhatsAppAutomationHub: React.FC<WhatsAppAutomationHubProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> Phase 2: WhatsApp Automation Engine
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> WhatsApp Automated Messaging OS
             </span>
             <span className="text-[10px] bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
               Meta Cloud API Connected

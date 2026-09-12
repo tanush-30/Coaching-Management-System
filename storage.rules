@@ -1,0 +1,104 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' ||
+        request.auth.token.email == 'admin@apexerp.com'
+      );
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && request.auth.token.role == 'teacher';
+    }
+
+    function isStudent() {
+      return isAuthenticated() && request.auth.token.role == 'student';
+    }
+
+    function isParent() {
+      return isAuthenticated() && request.auth.token.role == 'parent';
+    }
+
+    function isTeacherOf(batchId) {
+      return isTeacher() && (
+        request.auth.token.batchIds != null &&
+        batchId in request.auth.token.batchIds
+      );
+    }
+
+    function isOwnStudent(studentId) {
+      return isStudent() && (
+        request.auth.token.studentId == studentId ||
+        request.auth.uid == studentId
+      );
+    }
+
+    function isParentOf(studentId) {
+      return isParent() && (
+        request.auth.token.childIds != null &&
+        studentId in request.auth.token.childIds
+      );
+    }
+
+    // Student profile photos and documents
+    match /students/{studentId}/{allPaths=**} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        isTeacher() ||
+        isOwnStudent(studentId) ||
+        isParentOf(studentId)
+      );
+      allow write: if isAdmin() || isOwnStudent(studentId);
+    }
+
+    // Teacher profile photos and documents
+    match /teachers/{teacherId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || (isTeacher() && request.auth.uid == teacherId);
+    }
+
+    // Study materials
+    match /materials/{batchId}/{allPaths=**} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        isTeacherOf(batchId) ||
+        (isStudent() && request.auth.token.batchId == batchId) ||
+        isParent()
+      );
+      allow write: if isAdmin() || isTeacherOf(batchId);
+    }
+
+    // Assignments / Homework
+    match /assignments/{batchId}/{allPaths=**} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        isTeacherOf(batchId) ||
+        (isStudent() && request.auth.token.batchId == batchId) ||
+        isParent()
+      );
+      allow write: if isAdmin() || isTeacherOf(batchId);
+    }
+
+    // Fee Receipts
+    match /receipts/{studentId}/{allPaths=**} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        isOwnStudent(studentId) ||
+        isParentOf(studentId)
+      );
+      allow write: if isAdmin();
+    }
+
+    // General fallback: Authenticated can read public assets, Admin can write
+    match /public/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

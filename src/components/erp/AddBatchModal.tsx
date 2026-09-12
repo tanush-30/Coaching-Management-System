@@ -1,14 +1,15 @@
 'use client';
 
-import React, { useState } from 'react';
-import { X, Layers, GraduationCap, Calendar, Clock, DollarSign } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Layers, GraduationCap, Calendar, Clock, DollarSign, Hash, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Batch, Teacher } from '@/lib/types';
+import { useERPStore } from '@/lib/store';
 
 interface AddBatchModalProps {
   isOpen: boolean;
   onClose: () => void;
   teachers: Teacher[];
-  onAddBatch: (batchData: Omit<Batch, 'id' | 'enrolledCount'>) => void;
+  onAddBatch: (batchData: Omit<Batch, 'id' | 'enrolledCount'> & { batchCode?: string }) => void;
 }
 
 export const AddBatchModal: React.FC<AddBatchModalProps> = ({
@@ -17,6 +18,13 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
   teachers,
   onAddBatch,
 }) => {
+  const { batches, checkIdAvailability } = useERPStore();
+
+  const [batchCode, setBatchCode] = useState('');
+  const [idValidation, setIdValidation] = useState<{ status: 'idle' | 'checking' | 'valid' | 'invalid'; message?: string }>({
+    status: 'idle',
+  });
+
   const [name, setName] = useState('');
   const [courseName, setCourseName] = useState('');
   const [grade, setGrade] = useState('Class 12');
@@ -30,6 +38,42 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
   const [annualFee, setAnnualFee] = useState<number>(85000);
   const [accentColor, setAccentColor] = useState('#4f46e5');
 
+  // Auto-suggest next Batch UID on open
+  useEffect(() => {
+    if (isOpen && !batchCode) {
+      const nextNum = batches.length + 1;
+      setBatchCode(`BAT-2026-${String(nextNum).padStart(3, '0')}`);
+    }
+  }, [isOpen, batches.length]);
+
+  // Real-time batch code uniqueness check
+  useEffect(() => {
+    const trimmed = batchCode.trim().toUpperCase();
+    if (!trimmed) {
+      setIdValidation({ status: 'invalid', message: 'Batch UID / Code is required' });
+      return;
+    }
+
+    let isMounted = true;
+    setIdValidation({ status: 'checking' });
+
+    const timeout = setTimeout(async () => {
+      const res = await checkIdAvailability(trimmed);
+      if (isMounted) {
+        if (res.available) {
+          setIdValidation({ status: 'valid', message: 'Batch UID is available' });
+        } else {
+          setIdValidation({ status: 'invalid', message: res.reason || 'This ID is already in use' });
+        }
+      }
+    }, 250);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeout);
+    };
+  }, [batchCode, checkIdAvailability]);
+
   if (!isOpen) return null;
 
   const toggleDay = (day: string) => {
@@ -40,36 +84,49 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !courseName) {
+    if (idValidation.status === 'invalid') {
+      alert(`Cannot create batch: ${idValidation.message}`);
+      return;
+    }
+
+    if (!name.trim() || !courseName.trim()) {
       alert('Please enter batch name and course name.');
       return;
     }
 
     const assignedTeacher = teachers.find((t) => t.id === teacherId);
 
-    onAddBatch({
-      name,
-      courseName,
-      grade,
-      subject,
-      teacherId,
-      teacherName: assignedTeacher ? assignedTeacher.name : 'Dr. Rajesh Verma',
-      scheduleDays,
-      startTime,
-      endTime,
-      room,
-      capacity,
-      annualFee,
-      accentColor,
-      academicYear: '2026-2027',
-    });
+    try {
+      onAddBatch({
+        batchCode: batchCode.trim().toUpperCase(),
+        name: name.trim(),
+        courseName: courseName.trim(),
+        grade,
+        subject,
+        teacherId,
+        teacherName: assignedTeacher ? assignedTeacher.name : 'Dr. Rajesh Verma',
+        scheduleDays,
+        startTime,
+        endTime,
+        room,
+        capacity,
+        annualFee,
+        accentColor,
+        academicYear: '2026-2027',
+      });
 
-    onClose();
+      onClose();
+    } catch (err: any) {
+      alert(err?.message || 'Failed to create batch.');
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto animate-fade-in">
-      <div className="bg-white rounded-3xl max-w-xl w-full p-6 md:p-8 shadow-2xl border border-slate-200 space-y-6 my-8">
+      <div className="bg-white rounded-3xl max-w-xl w-full p-6 md:p-8 shadow-2xl border border-slate-200 space-y-6 my-8 relative overflow-hidden">
+        {/* Top Accent Gradient Bar */}
+        <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-indigo-600 via-blue-600 to-cyan-500" />
+
         {/* Header */}
         <div className="flex items-center justify-between border-b pb-4">
           <div className="flex items-center gap-3">
@@ -78,7 +135,7 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900">Create New Course Batch</h3>
-              <p className="text-xs text-slate-500">Configure schedule, classroom, capacity, and faculty assignment</p>
+              <p className="text-xs text-slate-500">Configure UID, schedule, classroom, capacity, and faculty</p>
             </div>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100">
@@ -87,6 +144,44 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+          {/* Unique Batch UID Card */}
+          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1.5">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+              <Hash className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Batch UID / Unique Code</span>
+              <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              value={batchCode}
+              onChange={(e) => setBatchCode(e.target.value.toUpperCase())}
+              placeholder="e.g. BAT-2026-001 or BAT-JEE-ADV-2026"
+              className={`w-full text-xs font-mono font-bold bg-white border rounded-xl px-3 py-2.5 outline-none transition-all ${
+                idValidation.status === 'valid'
+                  ? 'border-emerald-500 ring-1 ring-emerald-500/20'
+                  : idValidation.status === 'invalid'
+                  ? 'border-rose-500 ring-1 ring-rose-500/20 bg-rose-50/40'
+                  : 'border-slate-300 focus:border-indigo-500'
+              }`}
+            />
+            <div className="text-[11px] font-semibold flex items-center gap-1">
+              {idValidation.status === 'valid' && (
+                <span className="text-emerald-600 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> {idValidation.message}
+                </span>
+              )}
+              {idValidation.status === 'invalid' && (
+                <span className="text-rose-600 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" /> {idValidation.message}
+                </span>
+              )}
+              {idValidation.status === 'checking' && (
+                <span className="text-amber-600">Checking Batch UID uniqueness...</span>
+              )}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-slate-700 mb-1">Batch Display Name *</label>
@@ -134,11 +229,15 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
                 onChange={(e) => setTeacherId(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 font-medium"
               >
-                {teachers.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name} ({t.subjects[0]})
-                  </option>
-                ))}
+                {teachers.length === 0 ? (
+                  <option value="">No faculty enrolled yet</option>
+                ) : (
+                  teachers.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.subjects?.[0] || 'General'})
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>
@@ -238,7 +337,8 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-md shadow-indigo-600/30 flex items-center gap-1.5 active:scale-95"
+              disabled={idValidation.status === 'invalid'}
+              className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold shadow-md shadow-indigo-600/30 flex items-center gap-1.5 active:scale-95"
             >
               <Layers className="w-4 h-4" />
               <span>Create Batch</span>
@@ -249,3 +349,4 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
     </div>
   );
 };
+

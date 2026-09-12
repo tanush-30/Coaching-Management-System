@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Batch, Student, Teacher } from '@/lib/types';
 import { AddBatchModal } from './AddBatchModal';
+import { UserAvatar } from '@/components/common/UserAvatar';
 
 interface BatchManagementProps {
   batches: Batch[];
@@ -49,7 +50,7 @@ export const BatchManagement: React.FC<BatchManagementProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Phase 1: Foundation Module</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Batch & Course Administration</span>
             <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold">Academic Batches</span>
           </div>
           <h2 className="text-xl font-bold text-slate-900 mt-1">Batch & Classroom Management</h2>
@@ -107,10 +108,17 @@ export const BatchManagement: React.FC<BatchManagementProps> = ({
               />
 
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-slate-100 text-slate-700">
-                    {batch.grade}
-                  </span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-slate-100 text-slate-700">
+                      {batch.grade}
+                    </span>
+                    {batch.batchCode && (
+                      <span className="font-mono text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
+                        {batch.batchCode}
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100">
                     ₹{batch.annualFee.toLocaleString('en-IN')}/yr
                   </span>
@@ -202,7 +210,14 @@ export const BatchManagement: React.FC<BatchManagementProps> = ({
           <div className="bg-white rounded-3xl max-w-2xl w-full p-6 md:p-8 shadow-2xl border border-slate-200 space-y-6 my-8">
             <div className="flex items-center justify-between border-b pb-4">
               <div>
-                <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">{selectedBatchRoster.grade} • {selectedBatchRoster.room}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">{selectedBatchRoster.grade} • {selectedBatchRoster.room}</span>
+                  {selectedBatchRoster.batchCode && (
+                    <span className="font-mono text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                      {selectedBatchRoster.batchCode}
+                    </span>
+                  )}
+                </div>
                 <h3 className="text-xl font-bold text-slate-900 mt-0.5">{selectedBatchRoster.name} — Student Roster</h3>
                 <p className="text-xs text-slate-500">Lead Faculty: {selectedBatchRoster.teacherName}</p>
               </div>
@@ -223,10 +238,11 @@ export const BatchManagement: React.FC<BatchManagementProps> = ({
                   .map((student) => (
                     <div key={student.id} className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 hover:bg-slate-50 text-xs">
                       <div className="flex items-center gap-3">
-                        <img
+                        <UserAvatar
                           src={student.avatar}
-                          alt={student.name}
-                          className="w-9 h-9 rounded-full object-cover border"
+                          name={student.name}
+                          type="student"
+                          size="sm"
                         />
                         <div>
                           <div className="font-bold text-slate-900">{student.name}</div>

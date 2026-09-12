@@ -3,12 +3,12 @@
 // This prevents self-elevation attacks where users set their own role via client SDK
 
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from './firebase';
+import { getClientDb } from './firebase';
 import type { UserRole } from './types';
 
 export async function getUserRole(uid: string): Promise<UserRole | null> {
   try {
-    const snap = await getDoc(doc(db, 'user_roles', uid));
+    const snap = await getDoc(doc(getClientDb(), 'user_roles', uid));
     if (!snap.exists()) return null;
     return snap.data().role as UserRole;
   } catch {

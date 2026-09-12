@@ -9,12 +9,18 @@ import { initializeApp, getApps, getApp, cert, type App } from 'firebase-admin/a
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { getAuth, type Auth } from 'firebase-admin/auth';
 
+export const isFirebaseAdminConfigured: boolean = Boolean(
+  process.env.FIREBASE_ADMIN_PROJECT_ID &&
+  process.env.FIREBASE_ADMIN_CLIENT_EMAIL &&
+  process.env.FIREBASE_ADMIN_PRIVATE_KEY
+);
+
 function getAdminApp(): App {
   if (getApps().length > 0) return getApp();
 
-  if (!process.env.FIREBASE_ADMIN_PROJECT_ID) {
+  if (!isFirebaseAdminConfigured) {
     throw new Error(
-      'FIREBASE_ADMIN_PROJECT_ID is not set. Add it to .env.local and restart the dev server.'
+      'Firebase Admin SDK credentials are not configured. Check .env.local.'
     );
   }
 

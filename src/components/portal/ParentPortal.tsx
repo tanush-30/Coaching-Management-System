@@ -49,7 +49,22 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [selectedPaymentInst, setSelectedPaymentInst] = useState<FeeInstallment | null>(null);
 
   const currentStudent = students.find((s) => s.id === selectedStudentId) || students[0];
-  const studentBatch = batches.find((b) => currentStudent.batchIds.includes(b.id));
+
+  if (!currentStudent) {
+    return (
+      <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center space-y-4 shadow-sm max-w-3xl mx-auto">
+        <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
+          <Smartphone className="w-8 h-8" />
+        </div>
+        <h3 className="font-extrabold text-xl text-slate-900">No Enrolled Students Found</h3>
+        <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+          The Parent Portal dynamically links to your student database. Once you enroll students in the Admin Portal, parents will see live attendance, fee receipts, and exam scorecards here.
+        </p>
+      </div>
+    );
+  }
+
+  const studentBatch = batches.find((b) => (currentStudent.batchIds || []).includes(b.id));
 
   // Student specific data
   const studentInstallments = installments.filter((i) => i.studentId === currentStudent.id);
@@ -57,7 +72,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const paidInstallments = studentInstallments.filter((i) => i.status === 'paid');
 
   const studentMarks = marks.filter((m) => m.studentId === currentStudent.id);
-  const studentHomework = homework.filter((h) => currentStudent.batchIds.includes(h.batchId));
+  const studentHomework = homework.filter((h) => (currentStudent.batchIds || []).includes(h.batchId));
 
   // Attendance stats for student
   let totalClasses = 0;
@@ -89,20 +104,22 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             </div>
 
             {/* Child Selector Switcher */}
-            <div className="bg-slate-800/80 p-2 rounded-2xl border border-slate-700 flex items-center gap-2">
-              <span className="text-[10px] font-bold text-slate-400 uppercase pl-2">Select Child:</span>
-              <select
-                value={selectedStudentId}
-                onChange={(e) => setSelectedStudentId(e.target.value)}
-                className="bg-slate-900 border border-slate-700 text-white font-bold text-xs rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-indigo-500"
-              >
-                {students.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} ({s.rollNo})
-                  </option>
-                ))}
-              </select>
-            </div>
+            {students.length > 1 && (
+              <div className="bg-slate-800/80 p-2 rounded-2xl border border-slate-700 flex items-center gap-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase pl-2">Select Child:</span>
+                <select
+                  value={selectedStudentId}
+                  onChange={(e) => setSelectedStudentId(e.target.value)}
+                  className="bg-slate-900 border border-slate-700 text-white font-bold text-xs rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-indigo-500"
+                >
+                  {students.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.rollNo})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Student Quick Profile Card */}

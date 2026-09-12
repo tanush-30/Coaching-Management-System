@@ -24,6 +24,7 @@ import { Batch, FeeInstallment, Student } from '@/lib/types';
 import { AddStudentModal } from './AddStudentModal';
 import { RecordPaymentModal } from './RecordPaymentModal';
 import { generateFeeReceiptPDF } from '@/lib/pdf-service';
+import { UserAvatar } from '@/components/common/UserAvatar';
 
 interface StudentManagementProps {
   students: Student[];
@@ -73,7 +74,7 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Phase 1: Foundation Module</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Student Directory & Admissions</span>
             <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold">Live Student Roster</span>
           </div>
           <h2 className="text-xl font-bold text-slate-900 mt-1">Student & Parent Profile Management</h2>
@@ -178,10 +179,11 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
                       {/* Student Info */}
                       <td className="p-4">
                         <div className="flex items-center gap-3">
-                          <img
+                          <UserAvatar
                             src={student.avatar}
-                            alt={student.name}
-                            className="w-10 h-10 rounded-full object-cover border-2 border-indigo-100 shadow-xs"
+                            name={student.name}
+                            type="student"
+                            size="sm"
                           />
                           <div>
                             <div className="font-bold text-slate-900 text-sm">{student.name}</div>
@@ -201,17 +203,29 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
                         <div className="text-[10px] text-slate-400">{student.parentRelation}</div>
                       </td>
 
-                      {/* Batch */}
+                      {/* Batch Assignment */}
                       <td className="p-4">
-                        {studentBatch ? (
-                          <div>
-                            <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg font-bold text-xs inline-block border border-indigo-100">
-                              {studentBatch.name}
-                            </span>
-                            <div className="text-[10px] text-slate-500 mt-1">{studentBatch.scheduleDays.join(', ')} • {studentBatch.startTime}</div>
+                        <select
+                          value={student.batchIds?.[0] || ''}
+                          onChange={(e) => {
+                            const newBatchId = e.target.value;
+                            onUpdateStudent(student.id, {
+                              batchIds: newBatchId ? [newBatchId] : [],
+                            });
+                          }}
+                          className="bg-indigo-50/70 hover:bg-indigo-100/80 border border-indigo-200 text-indigo-900 text-xs font-bold rounded-xl px-2.5 py-1.5 focus:ring-2 focus:ring-indigo-500 max-w-[200px] cursor-pointer transition-colors"
+                        >
+                          <option value="">-- No Batch Assigned --</option>
+                          {batches.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.name} ({b.courseName})
+                            </option>
+                          ))}
+                        </select>
+                        {studentBatch && (
+                          <div className="text-[10px] text-slate-500 mt-1 pl-1">
+                            {studentBatch.scheduleDays.join(', ')} • {studentBatch.startTime}
                           </div>
-                        ) : (
-                          <span className="text-slate-400 italic">No Batch Assigned</span>
                         )}
                       </td>
 
@@ -323,10 +337,11 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
           <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-6">
             <div className="flex items-center justify-between border-b pb-4">
               <div className="flex items-center gap-3">
-                <img
+                <UserAvatar
                   src={selectedStudentForView.avatar}
-                  alt={selectedStudentForView.name}
-                  className="w-12 h-12 rounded-full object-cover border-2 border-indigo-200"
+                  name={selectedStudentForView.name}
+                  type="student"
+                  size="md"
                 />
                 <div>
                   <h3 className="text-lg font-bold text-slate-900">{selectedStudentForView.name}</h3>
@@ -349,6 +364,32 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
                 <span className="font-bold text-slate-900 mt-0.5 block">{selectedStudentForView.schoolName}</span>
                 <span className="text-[11px] text-slate-600">{selectedStudentForView.address}</span>
               </div>
+            </div>
+
+            {/* Enrolled Batch Selector */}
+            <div className="bg-indigo-50/50 p-3.5 rounded-2xl border border-indigo-100 space-y-1.5">
+              <span className="text-[10px] uppercase font-bold text-indigo-700 block">Assigned Batch / Program</span>
+              <select
+                value={selectedStudentForView.batchIds?.[0] || ''}
+                onChange={(e) => {
+                  const newBatchId = e.target.value;
+                  onUpdateStudent(selectedStudentForView.id, {
+                    batchIds: newBatchId ? [newBatchId] : [],
+                  });
+                  setSelectedStudentForView({
+                    ...selectedStudentForView,
+                    batchIds: newBatchId ? [newBatchId] : [],
+                  });
+                }}
+                className="w-full bg-white border border-slate-300 text-slate-800 text-xs font-bold rounded-xl px-3 py-2 focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              >
+                <option value="">-- No Batch Assigned --</option>
+                {batches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.courseName} • {b.grade})
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Fee Schedule */}
