@@ -8,6 +8,7 @@
 import { initializeApp, getApps, getApp, cert, type App } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { getAuth, type Auth } from 'firebase-admin/auth';
+import { getStorage, type Storage } from 'firebase-admin/storage';
 
 export const isFirebaseAdminConfigured: boolean = Boolean(
   process.env.FIREBASE_ADMIN_PROJECT_ID &&
@@ -24,6 +25,11 @@ function getAdminApp(): App {
     );
   }
 
+  const storageBucket =
+    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
+    process.env.FIREBASE_STORAGE_BUCKET ||
+    `${process.env.FIREBASE_ADMIN_PROJECT_ID}.appspot.com`;
+
   return initializeApp({
     credential: cert({
       projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
@@ -31,6 +37,7 @@ function getAdminApp(): App {
       // Next.js stores \n literally in env strings — convert back to real newlines
       privateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n'),
     }),
+    storageBucket,
   });
 }
 
@@ -41,6 +48,10 @@ export function getAdminDb(): Firestore {
 
 export function getAdminAuth(): Auth {
   return getAuth(getAdminApp());
+}
+
+export function getAdminStorage(): Storage {
+  return getStorage(getAdminApp());
 }
 
 // Convenience named exports (resolved lazily on first use)
@@ -55,3 +66,10 @@ export const adminAuth: Auth = new Proxy({} as Auth, {
     return getAdminAuth()[prop as keyof Auth];
   },
 });
+
+export const adminStorage: Storage = new Proxy({} as Storage, {
+  get(_target, prop) {
+    return getAdminStorage()[prop as keyof Storage];
+  },
+});
+

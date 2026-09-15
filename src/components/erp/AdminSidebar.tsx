@@ -20,8 +20,14 @@ import {
   Shield,
   Sparkles,
   ExternalLink,
+  Lock,
+  Settings,
+  Calendar,
+  FileSpreadsheet,
+  Wallet,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { SignOutConfirmModal } from '@/components/common/SignOutConfirmModal';
 
 export type AdminTab =
   | 'dashboard'
@@ -29,10 +35,15 @@ export type AdminTab =
   | 'teachers'
   | 'batches'
   | 'fees'
+  | 'payroll'
   | 'attendance'
   | 'academics'
+  | 'timetable'
   | 'analytics'
-  | 'whatsapp';
+  | 'reports'
+  | 'audit'
+  | 'whatsapp'
+  | 'settings';
 
 interface AdminSidebarProps {
   activeTab: AdminTab;
@@ -45,10 +56,12 @@ interface AdminSidebarProps {
   teacherCount: number;
   batchCount: number;
   examCount: number;
+  slotCount?: number;
   whatsappCount: number;
   onOpenEnrollStudent: () => void;
   onOpenEnrollTeacher: () => void;
   onOpenCreateBatch: () => void;
+  onChangePassword?: () => void;
 }
 
 interface NavItem {
@@ -75,13 +88,16 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   teacherCount,
   batchCount,
   examCount,
+  slotCount,
   whatsappCount,
   onOpenEnrollStudent,
   onOpenEnrollTeacher,
   onOpenCreateBatch,
+  onChangePassword,
 }) => {
   const { user, signOutUser } = useAuth();
   const [isQuickActionOpen, setIsQuickActionOpen] = React.useState(false);
+  const [isSignOutModalOpen, setIsSignOutModalOpen] = React.useState(false);
 
   const navGroups: NavGroup[] = [
     {
@@ -97,8 +113,10 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       title: 'OPERATIONS',
       items: [
         { id: 'fees', label: 'Fees & Invoicing', icon: CreditCard },
+        { id: 'payroll', label: 'Faculty Payroll', icon: Wallet },
         { id: 'attendance', label: 'Attendance', icon: Clock },
         { id: 'academics', label: 'Academics & Tests', icon: BookOpen, count: examCount },
+        { id: 'timetable', label: 'Timetable & Rooms', icon: Calendar, count: slotCount },
       ],
     },
     {
@@ -106,6 +124,14 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       items: [
         { id: 'whatsapp', label: 'WhatsApp Hub', icon: MessageSquare, badge: 'Live', count: whatsappCount },
         { id: 'analytics', label: 'Analytics', icon: TrendingUp },
+        { id: 'reports', label: 'Reports & Exports', icon: FileSpreadsheet },
+      ],
+    },
+    {
+      title: 'SYSTEM',
+      items: [
+        { id: 'settings', label: 'Settings & Config', icon: Settings },
+        { id: 'audit', label: 'Security & Audit Logs', icon: Shield },
       ],
     },
   ];
@@ -303,6 +329,38 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
               })}
             </div>
           ))}
+
+          {/* Upwards Change Password Option in Sidebar Navigation List */}
+          {onChangePassword && (
+            <div className="space-y-1 pt-2 border-t border-slate-800/80">
+              {!isCollapsed && (
+                <div className="px-3 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">
+                  ACCOUNT
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  onChangePassword();
+                  onCloseMobile();
+                }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all relative group text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer ${
+                  isCollapsed ? 'justify-center' : ''
+                }`}
+                title={isCollapsed ? 'Change Password' : undefined}
+              >
+                <Lock className="w-4 h-4 shrink-0 text-indigo-400 transition-transform group-hover:scale-110" />
+                {!isCollapsed && (
+                  <span className="truncate flex-1 text-left">Change Password</span>
+                )}
+                {isCollapsed && (
+                  <div className="absolute left-full ml-2 px-2.5 py-1 bg-slate-800 text-white text-xs rounded-lg shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 whitespace-nowrap">
+                    Change Password
+                  </div>
+                )}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Sidebar Footer & User Profile */}
@@ -370,37 +428,53 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           )}
 
           {!isCollapsed ? (
-            <div className="bg-slate-800/60 p-2.5 rounded-2xl border border-slate-700/60 flex items-center justify-between">
-              <div className="flex items-center gap-2.5 truncate">
-                <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0">
-                  <Shield className="w-4 h-4" />
+            <div className="space-y-2">
+              <div className="bg-slate-800/60 p-2.5 rounded-2xl border border-slate-700/60 flex items-center justify-between">
+                <div className="flex items-center gap-2.5 truncate">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0">
+                    <Shield className="w-4 h-4" />
+                  </div>
+                  <div className="truncate">
+                    <div className="text-xs font-bold text-white truncate">{user?.displayName || 'Administrator'}</div>
+                    <div className="text-[10px] text-slate-400 truncate">{user?.email || 'admin@apexerp.com'}</div>
+                  </div>
                 </div>
-                <div className="truncate">
-                  <div className="text-xs font-bold text-white truncate">{user?.displayName || 'Administrator'}</div>
-                  <div className="text-[10px] text-slate-400 truncate">{user?.email || 'admin@apexerp.com'}</div>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsSignOutModalOpen(true)}
+                  className="p-1.5 rounded-xl hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
               </div>
-              <button
-                onClick={() => signOutUser('/login/admin')}
-                className="p-1.5 rounded-xl hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
-                title="Sign Out"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
             </div>
           ) : (
-            <div className="flex justify-center">
+            <div className="flex flex-col items-center gap-2">
               <button
-                onClick={() => signOutUser('/login/admin')}
-                className="w-9 h-9 rounded-xl hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 flex items-center justify-center transition-colors cursor-pointer"
+                type="button"
+                onClick={() => setIsSignOutModalOpen(true)}
+                className="w-9 h-9 rounded-xl hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 flex items-center justify-center transition-colors cursor-pointer group relative"
                 title="Sign Out"
               >
                 <LogOut className="w-4 h-4" />
+                <div className="absolute left-full ml-2 px-2.5 py-1 bg-slate-800 text-white text-xs rounded-lg shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 whitespace-nowrap">
+                  Sign Out
+                </div>
               </button>
             </div>
           )}
         </div>
       </aside>
+
+      {/* Crosschecking Sign Out Confirmation Modal */}
+      <SignOutConfirmModal
+        isOpen={isSignOutModalOpen}
+        onClose={() => setIsSignOutModalOpen(false)}
+        onConfirm={() => signOutUser('/login/admin')}
+        title="Admin Sign Out"
+        message="Are you sure you want to sign out of the Admin ERP Command Center?"
+      />
     </>
   );
 };

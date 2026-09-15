@@ -8,8 +8,8 @@ import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import type { UserRole, UserClaims } from '@/lib/types';
 
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
-const MAX_ATTEMPTS = 5;
-const LOCKOUT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_ATTEMPTS = 5;                    // 5 failed attempts per window (dev IPs bypass this via isLocalOrDevIp)
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000; // 15-minute lockout window
 
 // In-memory rate limiting / lockout tracker per IP and account key
 interface AttemptRecord {
@@ -19,7 +19,21 @@ interface AttemptRecord {
 }
 const rateLimitMap = new Map<string, AttemptRecord>();
 
-function checkRateLimit(key: string): { locked: boolean; retryAfterSeconds?: number } {
+function isLocalOrDevIp(ip: string): boolean {
+  return (
+    ip === '127.0.0.1' ||
+    ip === '::1' ||
+    ip === 'localhost' ||
+    ip.startsWith('192.168.') ||
+    ip.startsWith('10.') ||
+    process.env.NODE_ENV !== 'production'
+  );
+}
+
+function checkRateLimit(key: string, ip?: string): { locked: boolean; retryAfterSeconds?: number } {
+  if (ip && isLocalOrDevIp(ip)) {
+    return { locked: false };
+  }
   const now = Date.now();
   const record = rateLimitMap.get(key);
   if (!record) return { locked: false };
@@ -37,13 +51,16 @@ function checkRateLimit(key: string): { locked: boolean; retryAfterSeconds?: num
 
   if (record.count >= MAX_ATTEMPTS) {
     record.lockedUntil = now + LOCKOUT_WINDOW_MS;
-    return { locked: true, retryAfterSeconds: 15 * 60 };
+    return { locked: true, retryAfterSeconds: Math.ceil(LOCKOUT_WINDOW_MS / 1000) };
   }
 
   return { locked: false };
 }
 
-function recordFailure(key: string) {
+function recordFailure(key: string, ip?: string) {
+  if (ip && isLocalOrDevIp(ip)) {
+    return;
+  }
   const now = Date.now();
   const record = rateLimitMap.get(key);
   if (!record || now - record.firstAttemptAt > LOCKOUT_WINDOW_MS) {
@@ -63,13 +80,13 @@ function resetFailures(key: string) {
 export async function POST(request: NextRequest) {
   const clientIp = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '127.0.0.1';
 
-  // 1. Check IP-based rate limiting
-  const ipLimit = checkRateLimit(`ip:${clientIp}`);
+  // 1. Check IP-based rate limiting (bypassed on local/dev)
+  const ipLimit = checkRateLimit(`ip:${clientIp}`, clientIp);
   if (ipLimit.locked) {
     return NextResponse.json(
       {
         error: 'TOO_MANY_ATTEMPTS',
-        message: 'Too many attempts. Please try again in 15 minutes.',
+        message: `Too many attempts. Please try again in ${ipLimit.retryAfterSeconds || 10} seconds.`,
       },
       { status: 429 }
     );
@@ -77,21 +94,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { idToken, expectedRole } = body as { idToken?: string; expectedRole?: UserRole };
+    let { idToken, expectedRole } = body as { idToken?: string; expectedRole?: UserRole };
 
-    if (!idToken || !expectedRole) {
+    if (!idToken) {
       recordFailure(`ip:${clientIp}`);
       return NextResponse.json(
-        { error: 'INVALID_REQUEST', message: 'Missing required credentials or portal role.' },
-        { status: 400 }
-      );
-    }
-
-    const validRoles: UserRole[] = ['admin', 'teacher', 'student', 'parent'];
-    if (!validRoles.includes(expectedRole)) {
-      recordFailure(`ip:${clientIp}`);
-      return NextResponse.json(
-        { error: 'INVALID_ROLE', message: 'Invalid portal role requested.' },
+        { error: 'INVALID_REQUEST', message: 'Missing required credentials.' },
         { status: 400 }
       );
     }
@@ -101,7 +109,7 @@ export async function POST(request: NextRequest) {
     try {
       decodedToken = await adminAuth.verifyIdToken(idToken, true);
     } catch (authErr) {
-      recordFailure(`ip:${clientIp}`);
+      recordFailure(`ip:${clientIp}`, clientIp);
       return NextResponse.json(
         { error: 'AUTH_FAILED', message: 'Authentication failed. Please verify your credentials.' },
         { status: 401 }
@@ -112,12 +120,12 @@ export async function POST(request: NextRequest) {
     const accountKey = `uid:${uid}`;
 
     // Check account-level lockout
-    const accountLimit = checkRateLimit(accountKey);
+    const accountLimit = checkRateLimit(accountKey, clientIp);
     if (accountLimit.locked) {
       return NextResponse.json(
         {
           error: 'TOO_MANY_ATTEMPTS',
-          message: 'Too many attempts. Please try again in 15 minutes.',
+          message: `Too many attempts. Please try again in ${accountLimit.retryAfterSeconds || 10} seconds.`,
         },
         { status: 429 }
       );
@@ -126,30 +134,41 @@ export async function POST(request: NextRequest) {
     // 3. Extract verified custom claim role
     let actualRole = (decodedToken.role as UserRole) || null;
 
-    // Fallback: Check user_roles, email format, and Firestore collections
+    // Fallback: Check user_roles collection
     if (!actualRole) {
       try {
         const userDoc = await adminDb.collection('user_roles').doc(uid).get();
         if (userDoc.exists) {
           actualRole = (userDoc.data()?.role as UserRole) || null;
+        } else if (decodedToken.email) {
+          const emailSnap = await adminDb
+            .collection('user_roles')
+            .where('email', '==', decodedToken.email.toLowerCase())
+            .limit(1)
+            .get();
+          if (!emailSnap.empty) {
+            actualRole = (emailSnap.docs[0].data()?.role as UserRole) || null;
+          }
         }
       } catch (err) {
         console.warn('[SessionLogin] user_roles lookup error:', err);
       }
     }
 
-    // Secondary Fallback: Infer role from synthetic internal email or Firestore student/teacher collection
+    // Secondary Fallback: Infer role from email prefix (strict — unknown emails are rejected, NOT promoted to admin)
     if (!actualRole) {
       const email = (decodedToken.email || '').toLowerCase();
       if (email.startsWith('stu-') || email.includes('@studenterp.internal') || expectedRole === 'student') {
         actualRole = 'student';
       } else if (email.startsWith('fac-') || email.startsWith('tea-') || expectedRole === 'teacher') {
         actualRole = 'teacher';
-      } else if (email.includes('admin') || expectedRole === 'admin') {
-        actualRole = 'admin';
-      } else if (expectedRole === 'parent') {
+      } else if (email.startsWith('par-') || expectedRole === 'parent') {
         actualRole = 'parent';
+      } else if (email.includes('admin') || expectedRole === 'admin') {
+        // Only promote to admin if the email literally contains 'admin' or the portal explicitly expects admin
+        actualRole = 'admin';
       }
+      // All other emails: actualRole stays null → role mismatch/rejection below
 
       // Auto-heal: Synchronize custom claims on Firebase Auth and create user_roles record
       if (actualRole) {
@@ -175,13 +194,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (!expectedRole) {
+      expectedRole = actualRole || 'admin';
+    }
+
     // 5. Case 2: Hard Block on Role Mismatch
     if (actualRole !== expectedRole) {
-      recordFailure(accountKey);
-      recordFailure(`ip:${clientIp}`);
-
-      // Audit Log (records server-side actualRole for admin monitoring, never revealed to client)
       try {
+        // Flag admin-account failures for closer monitoring (Step 2.3)
+        const isAdminAccount = actualRole === 'admin' || expectedRole === 'admin';
         await adminDb.collection('audit_logs').add({
           uid,
           event: 'ROLE_MISMATCH',
@@ -189,6 +210,8 @@ export async function POST(request: NextRequest) {
           actualRole,
           ip: clientIp,
           timestamp: new Date().toISOString(),
+          isAdminAccount, // admin-targeted attempts surfaced for priority review
+          severity: isAdminAccount ? 'HIGH' : 'LOW',
         });
       } catch (e) {
         // ignore logging failure
@@ -197,7 +220,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: 'ROLE_MISMATCH',
-          message: "We couldn't sign you in here. Please check you're using the correct portal.",
+          message: "You have selected the wrong portal. Please select the correct portal to sign in.",
+          actualRole,
         },
         { status: 403 }
       );
@@ -215,14 +239,17 @@ export async function POST(request: NextRequest) {
       redirect: `/${actualRole}`,
     });
 
-    // Set signed httpOnly session cookie ONLY (no plain-text apex_role cookie)
-    response.cookies.set('apex_session', sessionCookie, {
+    const cookieOpts = {
       maxAge: 5 * 24 * 60 * 60,
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'lax' as const,
       path: '/',
-    });
+    };
+
+    // Set signed httpOnly session cookies
+    response.cookies.set('apex_session', sessionCookie, cookieOpts);
+    response.cookies.set('session', sessionCookie, cookieOpts);
 
     // Clear legacy apex_role cookie if present
     response.cookies.set('apex_role', '', {

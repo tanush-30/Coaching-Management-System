@@ -1,14 +1,16 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Layers, GraduationCap, Calendar, Clock, DollarSign, Hash, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, Layers, GraduationCap, Calendar, Clock, DollarSign, Hash, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { Batch, Teacher } from '@/lib/types';
 import { useERPStore } from '@/lib/store';
+import { findNextAvailableId, validateUniqueMemberId } from '@/lib/auth-utils';
 
 interface AddBatchModalProps {
   isOpen: boolean;
   onClose: () => void;
   teachers: Teacher[];
+  batches?: Batch[];
   onAddBatch: (batchData: Omit<Batch, 'id' | 'enrolledCount'> & { batchCode?: string }) => void;
 }
 
@@ -16,14 +18,18 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
   isOpen,
   onClose,
   teachers,
+  batches: propBatches,
   onAddBatch,
 }) => {
-  const { batches, checkIdAvailability } = useERPStore();
+  const { batches: storeBatches } = useERPStore();
+  const currentBatches = propBatches || storeBatches;
 
   const [batchCode, setBatchCode] = useState('');
   const [idValidation, setIdValidation] = useState<{ status: 'idle' | 'checking' | 'valid' | 'invalid'; message?: string }>({
     status: 'idle',
   });
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [name, setName] = useState('');
   const [courseName, setCourseName] = useState('');
@@ -38,16 +44,29 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
   const [annualFee, setAnnualFee] = useState<number>(85000);
   const [accentColor, setAccentColor] = useState('#4f46e5');
 
-  // Auto-suggest next Batch UID on open
+  // Auto-suggest next truly available Batch UID on open
   useEffect(() => {
-    if (isOpen && !batchCode) {
-      const nextNum = batches.length + 1;
-      setBatchCode(`BAT-2026-${String(nextNum).padStart(3, '0')}`);
+    if (isOpen) {
+      setFormError(null);
+      findNextAvailableId(
+        'BAT',
+        currentBatches.map((b) => b.batchCode || b.id),
+        (id) => validateUniqueMemberId(id, { batches: currentBatches }),
+        2026
+      ).then((nextId) => {
+        setBatchCode(nextId);
+        setIdValidation({ status: 'valid', message: 'Batch UID is available' });
+      });
+    } else {
+      setBatchCode('');
+      setIdValidation({ status: 'idle' });
+      setFormError(null);
     }
-  }, [isOpen, batches.length]);
+  }, [isOpen]);
 
   // Real-time batch code uniqueness check
   useEffect(() => {
+    setFormError(null);
     const trimmed = batchCode.trim().toUpperCase();
     if (!trimmed) {
       setIdValidation({ status: 'invalid', message: 'Batch UID / Code is required' });
@@ -58,7 +77,7 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
     setIdValidation({ status: 'checking' });
 
     const timeout = setTimeout(async () => {
-      const res = await checkIdAvailability(trimmed);
+      const res = await validateUniqueMemberId(trimmed, { batches: currentBatches });
       if (isMounted) {
         if (res.available) {
           setIdValidation({ status: 'valid', message: 'Batch UID is available' });
@@ -66,13 +85,13 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
           setIdValidation({ status: 'invalid', message: res.reason || 'This ID is already in use' });
         }
       }
-    }, 250);
+    }, 150);
 
     return () => {
       isMounted = false;
       clearTimeout(timeout);
     };
-  }, [batchCode, checkIdAvailability]);
+  }, [batchCode]);
 
   if (!isOpen) return null;
 
@@ -82,23 +101,37 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (idValidation.status === 'invalid') {
-      alert(`Cannot create batch: ${idValidation.message}`);
+    setFormError(null);
+
+    const finalBatchCode = batchCode.trim().toUpperCase();
+    if (!finalBatchCode) {
+      setFormError('Batch UID / Code is required.');
       return;
     }
 
     if (!name.trim() || !courseName.trim()) {
-      alert('Please enter batch name and course name.');
+      setFormError('Please enter batch name and course name.');
       return;
     }
 
     const assignedTeacher = teachers.find((t) => t.id === teacherId);
 
+    setIsSubmitting(true);
     try {
-      onAddBatch({
-        batchCode: batchCode.trim().toUpperCase(),
+      // 1. Proactive availability check before saving
+      const preCheck = await validateUniqueMemberId(finalBatchCode, { batches: currentBatches });
+      if (!preCheck.available) {
+        setFormError(preCheck.reason || `Batch UID "${finalBatchCode}" is already in use.`);
+        setIdValidation({ status: 'invalid', message: preCheck.reason || 'This ID is already in use' });
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 2. Add batch to local store & Firestore
+      await onAddBatch({
+        batchCode: finalBatchCode,
         name: name.trim(),
         courseName: courseName.trim(),
         grade,
@@ -117,7 +150,10 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
 
       onClose();
     } catch (err: any) {
-      alert(err?.message || 'Failed to create batch.');
+      console.error('[AddBatchModal] Error adding batch:', err);
+      setFormError(err?.message || 'Failed to create batch.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -144,6 +180,15 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+          {formError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-2xl flex items-start gap-2.5 font-medium animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <div className="font-bold">Batch Creation Error</div>
+                <div className="text-[11px] text-rose-600 leading-relaxed">{formError}</div>
+              </div>
+            </div>
+          )}
           {/* Unique Batch UID Card */}
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1.5">
             <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
@@ -337,11 +382,15 @@ export const AddBatchModal: React.FC<AddBatchModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={idValidation.status === 'invalid'}
-              className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold shadow-md shadow-indigo-600/30 flex items-center gap-1.5 active:scale-95"
+              disabled={isSubmitting}
+              className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold shadow-md shadow-indigo-600/30 flex items-center gap-1.5 active:scale-95 transition-all"
             >
-              <Layers className="w-4 h-4" />
-              <span>Create Batch</span>
+              {isSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin text-white" />
+              ) : (
+                <Layers className="w-4 h-4" />
+              )}
+              <span>{isSubmitting ? 'Creating Batch...' : 'Create Batch'}</span>
             </button>
           </div>
         </form>

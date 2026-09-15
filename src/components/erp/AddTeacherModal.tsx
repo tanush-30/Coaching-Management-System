@@ -23,12 +23,14 @@ import {
 import { Batch, Teacher } from '@/lib/types';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { useERPStore } from '@/lib/store';
-import { generateDefaultPassword } from '@/lib/auth-utils';
+import { generateDefaultPassword, findNextAvailableId, validateUniqueMemberId } from '@/lib/auth-utils';
+import { Loader2 } from 'lucide-react';
 
 interface AddTeacherModalProps {
   isOpen: boolean;
   onClose: () => void;
   batches: Batch[];
+  teachers?: Teacher[];
   onAddTeacher: (teacherData: Omit<Teacher, 'id'> & { id?: string; facultyId?: string }) => void;
 }
 
@@ -47,14 +49,18 @@ export const AddTeacherModal: React.FC<AddTeacherModalProps> = ({
   isOpen,
   onClose,
   batches,
+  teachers: propTeachers,
   onAddTeacher,
 }) => {
-  const { teachers, checkIdAvailability } = useERPStore();
+  const { teachers: storeTeachers } = useERPStore();
+  const currentTeachers = propTeachers || storeTeachers;
 
   const [customId, setCustomId] = useState('');
   const [idValidation, setIdValidation] = useState<{ status: 'idle' | 'checking' | 'valid' | 'invalid'; message?: string }>({
     status: 'idle',
   });
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -77,16 +83,29 @@ export const AddTeacherModal: React.FC<AddTeacherModalProps> = ({
   } | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Auto-suggest next faculty ID on open
+  // Auto-suggest next truly available faculty ID on open
   useEffect(() => {
-    if (isOpen && !customId) {
-      const nextNum = teachers.length + 1;
-      setCustomId(`FAC-2026-${String(nextNum).padStart(3, '0')}`);
+    if (isOpen) {
+      setFormError(null);
+      findNextAvailableId(
+        'FAC',
+        currentTeachers.map((t) => t.facultyId || t.id),
+        (id) => validateUniqueMemberId(id, { teachers: currentTeachers }),
+        2026
+      ).then((nextId) => {
+        setCustomId(nextId);
+        setIdValidation({ status: 'valid', message: 'ID is available' });
+      });
+    } else {
+      setCustomId('');
+      setIdValidation({ status: 'idle' });
+      setFormError(null);
     }
-  }, [isOpen, teachers.length]);
+  }, [isOpen]);
 
   // Validate custom ID in real time
   useEffect(() => {
+    setFormError(null);
     const trimmed = customId.trim().toUpperCase();
     if (!trimmed) {
       setIdValidation({ status: 'invalid', message: 'Faculty Member ID is required' });
@@ -97,21 +116,21 @@ export const AddTeacherModal: React.FC<AddTeacherModalProps> = ({
     setIdValidation({ status: 'checking' });
 
     const timeout = setTimeout(async () => {
-      const res = await checkIdAvailability(trimmed);
+      const res = await validateUniqueMemberId(trimmed, { teachers: currentTeachers });
       if (isMounted) {
         if (res.available) {
           setIdValidation({ status: 'valid', message: 'ID is available' });
         } else {
-          setIdValidation({ status: 'invalid', message: res.reason || 'This ID is already in use' });
+          setIdValidation({ status: 'invalid', message: res.reason || 'This Faculty ID is already assigned. Please enter a different ID.' });
         }
       }
-    }, 250);
+    }, 150);
 
     return () => {
       isMounted = false;
       clearTimeout(timeout);
     };
-  }, [customId, checkIdAvailability]);
+  }, [customId]);
 
   if (!isOpen) return null;
 
@@ -162,36 +181,66 @@ export const AddTeacherModal: React.FC<AddTeacherModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (idValidation.status === 'invalid') {
-      alert(`Cannot enroll faculty: ${idValidation.message}`);
+    setFormError(null);
+
+    const finalFacultyId = customId.trim().toUpperCase();
+    if (!finalFacultyId) {
+      setFormError('Faculty Member ID is required.');
       return;
     }
 
     if (!firstName.trim()) {
-      alert('Please enter faculty member First Name.');
+      setFormError('Please enter faculty member First Name.');
       return;
     }
     if (!phone.trim()) {
-      alert('Please enter contact phone/WhatsApp number for OTP recovery.');
+      setFormError('Please enter contact phone/WhatsApp number for OTP recovery.');
       return;
     }
     if (!dob) {
-      alert('Please select Date of Birth for login credential generation.');
+      setFormError('Please select Date of Birth for login credential generation.');
       return;
     }
     if (selectedSubjects.length === 0) {
-      alert('Please select or specify at least one teaching subject.');
+      setFormError('Please select or specify at least one teaching subject.');
       return;
     }
 
-    const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
-    const finalFacultyId = customId.trim().toUpperCase();
-    const generatedPassword = generateDefaultPassword(firstName, dob);
-    const defaultEmail = email.trim() || `${finalFacultyId.toLowerCase()}@studenterp.internal`;
-    const teacherDocId = `teacher-${Date.now()}`;
-
+    setIsSubmitting(true);
     try {
-      // 1. Provision Auth User via Server API
+      // 1. Proactive availability check before saving
+      const preCheck = await validateUniqueMemberId(finalFacultyId, { teachers: currentTeachers });
+      if (!preCheck.available) {
+        setFormError(preCheck.reason || `This Faculty ID is already assigned. Please enter a different ID.`);
+        setIdValidation({ status: 'invalid', message: preCheck.reason || 'This Faculty ID is already assigned. Please enter a different ID.' });
+        setIsSubmitting(false);
+        return;
+      }
+
+      const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
+      const generatedPassword = generateDefaultPassword(firstName, dob);
+      const defaultEmail = email.trim() || `${finalFacultyId.toLowerCase()}@studenterp.internal`;
+      const teacherDocId = `teacher-${Date.now()}`;
+
+      // 2. Add teacher to local ERP Store & Firestore
+      await onAddTeacher({
+        id: teacherDocId,
+        facultyId: finalFacultyId,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        dob,
+        name: fullName,
+        email: defaultEmail,
+        phone: phone.trim(),
+        avatar: photoDataUrl || '',
+        subjects: selectedSubjects,
+        qualifications: qualifications.trim() || 'Faculty Specialist',
+        joiningDate,
+        status,
+        assignedBatches,
+      });
+
+      // 3. Provision Auth User via Server API (non-blocking)
       fetch('/api/admin/enroll-member', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -213,32 +262,17 @@ export const AddTeacherModal: React.FC<AddTeacherModalProps> = ({
         }),
       }).catch((err) => console.warn('[AddTeacher] Auth provision notice:', err));
 
-      // 2. Add teacher to local ERP Store & Firestore
-      onAddTeacher({
-        id: teacherDocId,
-        facultyId: finalFacultyId,
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        dob,
-        name: fullName,
-        email: defaultEmail,
-        phone: phone.trim(),
-        avatar: photoDataUrl || '',
-        subjects: selectedSubjects,
-        qualifications: qualifications.trim() || 'Faculty Specialist',
-        joiningDate,
-        status,
-        assignedBatches,
-      });
-
-      // 3. Show credentials confirmation dialog
+      // 4. Show credentials confirmation dialog
       setEnrolledCredentials({
         uid: finalFacultyId,
         tempPassword: generatedPassword,
         fullName,
       });
     } catch (err: any) {
-      alert(err?.message || 'Failed to enroll faculty member. Please verify the ID is unique.');
+      console.error('[AddTeacherModal] Error adding teacher:', err);
+      setFormError(err.message || 'Failed to enroll faculty member. Please review form details.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -354,6 +388,15 @@ export const AddTeacherModal: React.FC<AddTeacherModalProps> = ({
 
             {/* Enrollment Form */}
             <form onSubmit={handleSubmit} className="space-y-5">
+              {formError && (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-2xl flex items-start gap-2.5 font-medium animate-fadeIn">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <div className="font-bold">Faculty Enrollment Error</div>
+                    <div className="text-[11px] text-rose-600 leading-relaxed">{formError}</div>
+                  </div>
+                </div>
+              )}
               {/* Custom Unique Faculty ID & Real Photo Picker */}
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
                 {/* Unique Faculty ID Input */}
@@ -672,11 +715,15 @@ export const AddTeacherModal: React.FC<AddTeacherModalProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={idValidation.status === 'invalid'}
+                  disabled={isSubmitting}
                   className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-md shadow-purple-600/30 transition-all hover:scale-[1.02] active:scale-95"
                 >
-                  <GraduationCap className="w-4 h-4" />
-                  <span>Enroll Faculty Member</span>
+                  {isSubmitting ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  ) : (
+                    <GraduationCap className="w-4 h-4" />
+                  )}
+                  <span>{isSubmitting ? 'Enrolling Faculty...' : 'Enroll Faculty Member'}</span>
                 </button>
               </div>
             </form>

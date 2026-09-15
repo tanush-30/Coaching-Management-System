@@ -15,9 +15,10 @@ import {
   X,
   Lock,
 } from 'lucide-react';
-import { PORTAL_NAV_ITEMS, PortalRole } from '@/lib/config/navConfig';
+import { PORTAL_NAV_SECTIONS, PortalRole } from '@/lib/config/navConfig';
 import { useAuth } from '@/lib/auth-context';
 import { UserAvatar } from '@/components/common/UserAvatar';
+import { SignOutConfirmModal } from '@/components/common/SignOutConfirmModal';
 
 interface PortalSidebarProps {
   role: PortalRole;
@@ -50,7 +51,8 @@ export const PortalSidebar: React.FC<PortalSidebarProps> = ({
   badgeCounts = {},
 }) => {
   const { signOutUser } = useAuth();
-  const navItems = PORTAL_NAV_ITEMS[role] || [];
+  const [isSignOutModalOpen, setIsSignOutModalOpen] = useState(false);
+  const navSections = PORTAL_NAV_SECTIONS[role] || [];
 
   const roleAccent = role === 'faculty' ? 'emerald' : 'violet';
   const roleTitle = role === 'faculty' ? 'Faculty Portal' : 'Student App';
@@ -129,68 +131,129 @@ export const PortalSidebar: React.FC<PortalSidebarProps> = ({
           </button>
         </div>
 
-        {/* Navigation Item List */}
-        <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1.5 custom-scrollbar">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            const count = badgeCounts[item.id];
+        {/* Sectioned Navigation Item List */}
+        <div className="flex-1 overflow-y-auto py-3 px-3 space-y-3 custom-scrollbar">
+          {navSections.map((section, secIdx) => (
+            <div key={section.sectionTitle} className="space-y-1">
+              {/* Section Header (Expanded view) or Divider (Collapsed view) */}
+              {(!isCollapsed || isMobileOpen) ? (
+                <div className="px-3 pt-1.5 pb-0.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                    {section.sectionTitle}
+                  </span>
+                </div>
+              ) : (
+                secIdx > 0 && <div className="h-px bg-slate-800 my-1.5 mx-1" />
+              )}
 
-            return (
+              <div className="space-y-1">
+                {section.items.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  const count = badgeCounts[item.id];
+
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        onSelectTab(item.id);
+                        onCloseMobile();
+                      }}
+                      title={isCollapsed && !isMobileOpen ? item.label : undefined}
+                      className={`
+                        w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold
+                        transition-all duration-150 group relative
+                        ${
+                          isActive
+                            ? role === 'faculty'
+                              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+                              : 'bg-violet-600 text-white shadow-lg shadow-violet-600/30'
+                            : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/80'
+                        }
+                        ${isCollapsed && !isMobileOpen ? 'justify-center px-0' : ''}
+                      `}
+                    >
+                      <Icon
+                        className={`w-5 h-5 shrink-0 transition-transform group-hover:scale-110 ${
+                          isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'
+                        }`}
+                      />
+
+                      {(!isCollapsed || isMobileOpen) && (
+                        <span className="truncate text-left flex-1">{item.label}</span>
+                      )}
+
+                      {(!isCollapsed || isMobileOpen) && count !== undefined && (
+                        <span
+                          className={`
+                            text-[10px] px-1.5 py-0.5 rounded-full font-bold
+                            ${
+                              isActive
+                                ? 'bg-white/20 text-white'
+                                : 'bg-slate-800 text-slate-300'
+                            }
+                          `}
+                        >
+                          {count}
+                        </span>
+                      )}
+
+                      {/* Floating tooltip when collapsed */}
+                      {isCollapsed && !isMobileOpen && (
+                        <div className="fixed left-20 ml-2 px-2.5 py-1 bg-slate-800 text-white text-xs font-medium rounded-md shadow-xl border border-slate-700 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap">
+                          {item.label}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          {/* Account / Preferences Section */}
+          {onChangePassword && (
+            <div className="space-y-1 pt-1">
+              {(!isCollapsed || isMobileOpen) ? (
+                <div className="px-3 pt-2 pb-0.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                    ACCOUNT & SECURITY
+                  </span>
+                </div>
+              ) : (
+                <div className="h-px bg-slate-800 my-1.5 mx-1" />
+              )}
+
               <button
-                key={item.id}
                 onClick={() => {
-                  onSelectTab(item.id);
+                  onChangePassword();
                   onCloseMobile();
                 }}
-                title={isCollapsed && !isMobileOpen ? item.label : undefined}
+                title={isCollapsed && !isMobileOpen ? 'Change Password' : undefined}
                 className={`
                   w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold
                   transition-all duration-150 group relative
-                  ${
-                    isActive
-                      ? role === 'faculty'
-                        ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
-                        : 'bg-violet-600 text-white shadow-lg shadow-violet-600/30'
-                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/80'
-                  }
+                  text-slate-400 hover:text-slate-100 hover:bg-slate-800/80
                   ${isCollapsed && !isMobileOpen ? 'justify-center px-0' : ''}
                 `}
               >
-                <Icon
-                  className={`w-5 h-5 shrink-0 transition-transform group-hover:scale-110 ${
-                    isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'
-                  }`}
+                <Lock
+                  className="w-5 h-5 shrink-0 text-slate-400 group-hover:text-slate-200 transition-transform group-hover:scale-110"
                 />
 
                 {(!isCollapsed || isMobileOpen) && (
-                  <span className="truncate text-left flex-1">{item.label}</span>
-                )}
-
-                {(!isCollapsed || isMobileOpen) && count !== undefined && (
-                  <span
-                    className={`
-                      text-[10px] px-1.5 py-0.5 rounded-full font-bold
-                      ${
-                        isActive
-                          ? 'bg-white/20 text-white'
-                          : 'bg-slate-800 text-slate-300'
-                      }
-                    `}
-                  >
-                    {count}
-                  </span>
+                  <span className="truncate text-left flex-1">Change Password</span>
                 )}
 
                 {/* Floating tooltip when collapsed */}
                 {isCollapsed && !isMobileOpen && (
                   <div className="fixed left-20 ml-2 px-2.5 py-1 bg-slate-800 text-white text-xs font-medium rounded-md shadow-xl border border-slate-700 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap">
-                    {item.label}
+                    Change Password
                   </div>
                 )}
               </button>
-            );
-          })}
+            </div>
+          )}
         </div>
 
         {/* User Profile & Footer Actions */}
@@ -223,32 +286,36 @@ export const PortalSidebar: React.FC<PortalSidebarProps> = ({
             </div>
           )}
 
-          {/* Quick Action: Change Password */}
-          {onChangePassword && (!isCollapsed || isMobileOpen) && (
-            <button
-              onClick={onChangePassword}
-              className="w-full flex items-center justify-center gap-2 py-1.5 px-3 rounded-lg text-[11px] font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span>Change Password</span>
-            </button>
-          )}
-
           {/* Quick Action: Sign Out */}
           <button
-            onClick={() => signOutUser(role === 'faculty' ? '/login/teacher' : '/login/student')}
+            type="button"
+            onClick={() => setIsSignOutModalOpen(true)}
             title={isCollapsed && !isMobileOpen ? 'Sign Out' : undefined}
             className={`
               w-full flex items-center gap-2 py-2 px-3 rounded-xl text-xs font-bold
-              text-rose-400 hover:text-white hover:bg-rose-600/20 transition-colors cursor-pointer
+              text-rose-400 hover:text-white hover:bg-rose-600/20 transition-colors cursor-pointer group relative
               ${isCollapsed && !isMobileOpen ? 'justify-center px-0' : ''}
             `}
           >
             <LogOut className="w-4 h-4 shrink-0" />
             {(!isCollapsed || isMobileOpen) && <span>Sign Out</span>}
+            {isCollapsed && !isMobileOpen && (
+              <div className="fixed left-20 ml-2 px-2.5 py-1 bg-slate-800 text-white text-xs font-medium rounded-md shadow-xl border border-slate-700 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap">
+                Sign Out
+              </div>
+            )}
           </button>
         </div>
       </aside>
+
+      {/* Crosschecking Sign Out Confirmation Modal */}
+      <SignOutConfirmModal
+        isOpen={isSignOutModalOpen}
+        onClose={() => setIsSignOutModalOpen(false)}
+        onConfirm={() => signOutUser(role === 'faculty' ? '/login/teacher' : '/login/student')}
+        title={role === 'faculty' ? 'Faculty Sign Out' : 'Student Sign Out'}
+        message="Are you sure you want to sign out of your account?"
+      />
     </>
   );
 };

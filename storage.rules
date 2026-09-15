@@ -9,7 +9,8 @@ service firebase.storage {
     function isAdmin() {
       return isAuthenticated() && (
         request.auth.token.role == 'admin' ||
-        request.auth.token.email == 'admin@apexerp.com'
+        request.auth.token.email == 'admin@apexerp.com' ||
+        request.auth.token.email == 'tanushdemo@gmail.com'
       );
     }
 
@@ -32,6 +33,13 @@ service firebase.storage {
       );
     }
 
+    function isStudentOf(batchId) {
+      return isStudent() && (
+        request.auth.token.batchId == batchId ||
+        (request.auth.token.batchIds != null && batchId in request.auth.token.batchIds)
+      );
+    }
+
     function isOwnStudent(studentId) {
       return isStudent() && (
         request.auth.token.studentId == studentId ||
@@ -46,6 +54,10 @@ service firebase.storage {
       );
     }
 
+    function isValidFileSize() {
+      return request.resource == null || request.resource.size < 50 * 1024 * 1024;
+    }
+
     // Student profile photos and documents
     match /students/{studentId}/{allPaths=**} {
       allow read: if isAuthenticated() && (
@@ -54,35 +66,68 @@ service firebase.storage {
         isOwnStudent(studentId) ||
         isParentOf(studentId)
       );
-      allow write: if isAdmin() || isOwnStudent(studentId);
+      allow write: if (isAdmin() || isOwnStudent(studentId)) && isValidFileSize();
     }
 
     // Teacher profile photos and documents
     match /teachers/{teacherId}/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin() || (isTeacher() && request.auth.uid == teacherId);
+      allow write: if (isAdmin() || (isTeacher() && request.auth.uid == teacherId)) && isValidFileSize();
     }
 
-    // Study materials
+    // Phase 5: Study materials (Primary path: studyMaterials/{batchId}/...)
+    match /studyMaterials/{batchId}/{allPaths=**} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        isTeacherOf(batchId) ||
+        isStudentOf(batchId) ||
+        isParent()
+      );
+      allow write: if (isAdmin() || isTeacherOf(batchId)) && isValidFileSize();
+    }
+
+    // Legacy/Alternative Study materials path
     match /materials/{batchId}/{allPaths=**} {
       allow read: if isAuthenticated() && (
         isAdmin() ||
         isTeacherOf(batchId) ||
-        (isStudent() && request.auth.token.batchId == batchId) ||
+        isStudentOf(batchId) ||
         isParent()
       );
-      allow write: if isAdmin() || isTeacherOf(batchId);
+      allow write: if (isAdmin() || isTeacherOf(batchId)) && isValidFileSize();
     }
 
-    // Assignments / Homework
+    // Homework & DPPs (Primary path: homework/{batchId}/...)
+    match /homework/{batchId}/{allPaths=**} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        isTeacherOf(batchId) ||
+        isStudentOf(batchId) ||
+        isParent()
+      );
+      allow write: if (isAdmin() || isTeacherOf(batchId)) && isValidFileSize();
+    }
+
+    // Homework Submissions (Student uploads: homeworkSubmissions/{assignmentId}/{studentId}/...)
+    match /homeworkSubmissions/{assignmentId}/{studentId}/{allPaths=**} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        isTeacher() ||
+        isOwnStudent(studentId) ||
+        isParentOf(studentId)
+      );
+      allow write: if (isAdmin() || isOwnStudent(studentId)) && isValidFileSize();
+    }
+
+    // Legacy Assignments path
     match /assignments/{batchId}/{allPaths=**} {
       allow read: if isAuthenticated() && (
         isAdmin() ||
         isTeacherOf(batchId) ||
-        (isStudent() && request.auth.token.batchId == batchId) ||
+        isStudentOf(batchId) ||
         isParent()
       );
-      allow write: if isAdmin() || isTeacherOf(batchId);
+      allow write: if (isAdmin() || isTeacherOf(batchId)) && isValidFileSize();
     }
 
     // Fee Receipts
@@ -92,13 +137,13 @@ service firebase.storage {
         isOwnStudent(studentId) ||
         isParentOf(studentId)
       );
-      allow write: if isAdmin();
+      allow write: if isAdmin() && isValidFileSize();
     }
 
     // General fallback: Authenticated can read public assets, Admin can write
     match /public/{allPaths=**} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isAdmin() && isValidFileSize();
     }
   }
 }

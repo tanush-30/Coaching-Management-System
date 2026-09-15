@@ -44,8 +44,14 @@ export async function middleware(request: NextRequest) {
     ? '/login/parent'
     : '/login';
 
-  // 4. If no session cookie exists, redirect immediately to the appropriate login portal
+  // 4. If no session cookie exists:
+  //    - Admin routes → 404 cloak (a redirect would confirm the route exists)
+  //    - All other protected routes → redirect to their login portal
   if (!sessionCookie) {
+    if (isTargetAdmin) {
+      // Step 4: Cloak — return a genuine-looking 404, not a redirect that leaks /admin exists
+      return NextResponse.rewrite(new URL('/_not-found', request.url));
+    }
     const loginUrl = new URL(fallbackLoginPath, request.url);
     loginUrl.searchParams.set('redirect', pathname);
     return NextResponse.redirect(loginUrl);
@@ -91,9 +97,9 @@ export async function middleware(request: NextRequest) {
     // 7. Strict Admin Route Gating: Must have verified custom claim `role: 'admin'`
     if (isTargetAdmin) {
       if (userRole !== 'admin') {
-        const unauthorizedUrl = new URL('/login/admin', request.url);
-        unauthorizedUrl.searchParams.set('error', 'unauthorized');
-        return NextResponse.redirect(unauthorizedUrl);
+        // Step 4: Cloak — non-admin authenticated users also get a 404, not a 403/redirect.
+        // A 302 to /login/admin?error=unauthorized confirms the route exists to a logged-in attacker.
+        return NextResponse.rewrite(new URL('/_not-found', request.url));
       }
       return NextResponse.next();
     }

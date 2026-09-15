@@ -20,6 +20,8 @@ import {
 import { FeeInstallment, Student } from '@/lib/types';
 import { RecordPaymentModal } from './RecordPaymentModal';
 import { generateFeeReceiptPDF } from '@/lib/pdf-service';
+import { PaymentReconciliation } from './PaymentReconciliation';
+import { formatWhatsAppPhone, buildWhatsAppFeeReminderUrl } from '@/lib/phone-utils';
 
 interface FeeManagementProps {
   installments: FeeInstallment[];
@@ -34,6 +36,7 @@ export const FeeManagement: React.FC<FeeManagementProps> = ({
   onRecordPayment,
   onSendReminder,
 }) => {
+  const [feeViewTab, setFeeViewTab] = useState<'invoices' | 'reconciliation'>('invoices');
   const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'overdue' | 'paid'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedInstForPayment, setSelectedInstForPayment] = useState<{ installment: FeeInstallment; student: Student } | null>(null);
@@ -68,6 +71,22 @@ export const FeeManagement: React.FC<FeeManagementProps> = ({
   };
 
   const handleSendReminder = (instId: string) => {
+    const inst = installments.find((i) => i.id === instId);
+    const student = inst ? students.find((s) => s.id === inst.studentId) : null;
+    if (inst && student) {
+      const waUrl = buildWhatsAppFeeReminderUrl({
+        parentPhone: student.parentPhone,
+        parentName: student.parentName,
+        studentName: student.name,
+        title: inst.title,
+        amount: inst.amount,
+        dueDate: inst.dueDate,
+        paymentLink: inst.paymentLink,
+      });
+      if (waUrl && typeof window !== 'undefined') {
+        window.open(waUrl, '_blank', 'noopener,noreferrer');
+      }
+    }
     onSendReminder(instId);
     setRemindedInstId(instId);
     setTimeout(() => setRemindedInstId(null), 3000);
@@ -75,7 +94,7 @@ export const FeeManagement: React.FC<FeeManagementProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header with Sub-Tab Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
         <div>
           <div className="flex items-center gap-2">
@@ -85,7 +104,41 @@ export const FeeManagement: React.FC<FeeManagementProps> = ({
           <h2 className="text-xl font-bold text-slate-900 mt-1">Fee Management & Digital Receipts</h2>
           <p className="text-xs text-slate-500">Track installment schedules, generate UPI payment links, and download verified PDF receipts.</p>
         </div>
+
+        {/* Sub-view Segmented Tabs */}
+        <div className="flex items-center p-1 bg-slate-100 rounded-2xl border border-slate-200 shrink-0 self-start sm:self-auto">
+          <button
+            onClick={() => setFeeViewTab('invoices')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              feeViewTab === 'invoices'
+                ? 'bg-white text-indigo-600 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Invoices & Dues
+          </button>
+          <button
+            onClick={() => setFeeViewTab('reconciliation')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+              feeViewTab === 'reconciliation'
+                ? 'bg-white text-indigo-600 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <span>Gateway Sync</span>
+            <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse" />
+          </button>
+        </div>
       </div>
+
+      {feeViewTab === 'reconciliation' ? (
+        <PaymentReconciliation
+          installments={installments}
+          students={students}
+          onRecordPayment={onRecordPayment}
+        />
+      ) : (
+        <>
 
       {/* KPI Financial Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -230,22 +283,46 @@ export const FeeManagement: React.FC<FeeManagementProps> = ({
                         <div className="flex items-center justify-end gap-2">
                           {inst.status === 'paid' ? (
                             <button
-                              onClick={() => generateFeeReceiptPDF(student, inst)}
-                              className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-bold text-xs flex items-center gap-1 border border-indigo-200 transition-all shadow-xs"
+                              onClick={() => {
+                                if (inst.receiptUrl) {
+                                  window.open(inst.receiptUrl, '_blank');
+                                } else {
+                                  generateFeeReceiptPDF(student, inst);
+                                }
+                              }}
+                              className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-bold text-xs flex items-center gap-1 border border-indigo-200 transition-all shadow-xs cursor-pointer"
                             >
                               <Download className="w-3.5 h-3.5" />
                               <span>PDF Receipt</span>
                             </button>
                           ) : (
                             <>
-                              <button
-                                onClick={() => handleSendReminder(inst.id)}
-                                className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl font-bold text-[11px] flex items-center gap-1 border border-emerald-200 transition-all"
-                                title="Send WhatsApp Payment Link Reminder"
-                              >
-                                <Send className="w-3 h-3" />
-                                <span>{remindedInstId === inst.id ? 'Sent ✓' : 'WhatsApp Link'}</span>
-                              </button>
+                              {(() => {
+                                const phoneCheck = formatWhatsAppPhone(student.parentPhone);
+                                return (
+                                  <button
+                                    onClick={() => {
+                                      if (phoneCheck.isValid) {
+                                        handleSendReminder(inst.id);
+                                      }
+                                    }}
+                                    disabled={!phoneCheck.isValid}
+                                    className={`px-2.5 py-1.5 rounded-xl font-bold text-[11px] flex items-center gap-1 border transition-all ${
+                                      !phoneCheck.isValid
+                                        ? 'bg-slate-100 text-slate-400 border-slate-200 opacity-60 cursor-not-allowed'
+                                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 cursor-pointer'
+                                    }`}
+                                    title={
+                                      phoneCheck.isValid
+                                        ? `Send WhatsApp reminder to ${phoneCheck.displayFormat}`
+                                        : 'Parent WhatsApp phone number is missing or invalid'
+                                    }
+                                  >
+                                    <Send className="w-3 h-3" />
+                                    <span>{remindedInstId === inst.id ? 'Sent ✓' : 'WhatsApp Link'}</span>
+                                  </button>
+                                );
+                              })()}
 
                               <button
                                 onClick={() => setSelectedInstForPayment({ installment: inst, student })}
@@ -275,6 +352,8 @@ export const FeeManagement: React.FC<FeeManagementProps> = ({
         student={selectedInstForPayment?.student || null}
         onRecord={onRecordPayment}
       />
+        </>
+      )}
     </div>
   );
 };

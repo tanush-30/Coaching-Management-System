@@ -1,6 +1,18 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import {
+  submitHomeworkRecord,
+  gradeHomeworkSubmissionRecord,
+  type SubmitHomeworkInput,
+  type GradeSubmissionInput,
+} from './homework-submissions-service';
+import {
+  computeAllStudentsProgress,
+  computeBatchProgressSummary,
+  type BatchProgressSummary,
+} from './student-progress-service';
+import { logAuditEvent } from './audit-service';
 import {
   Student,
   Batch,
@@ -11,9 +23,29 @@ import {
   ExamTest,
   StudentExamMark,
   Homework,
+  HomeworkSubmission,
   StudyMaterial,
   WhatsAppMessage,
+  GradeBoundary,
+  SchoolInfoSettings,
+  NotificationTemplatesSettings,
+  GradingScaleSettings,
+  TimetableSlot,
+  TimetableSlotInput,
+  TimetableConflict,
+  Announcement,
 } from './types';
+import { validateAnnouncement } from './announcement-validator';
+import {
+  detectTimetableConflicts,
+  validateTimetableSlotInput,
+} from './timetable-utils';
+import {
+  DEFAULT_SCHOOL_INFO,
+  DEFAULT_NOTIFICATION_TEMPLATES,
+  DEFAULT_GRADING_SCALE,
+} from './settings-defaults';
+import { interpolateTemplate } from './settings-service';
 import {
   INITIAL_STUDENTS,
   INITIAL_BATCHES,
@@ -40,6 +72,37 @@ import {
   BatchOperation,
 } from './firestore-service';
 
+/**
+ * Reads live cached settings for dynamic notifications and grading
+ */
+function getStoreSettings(): {
+  school: SchoolInfoSettings;
+  notifs: NotificationTemplatesSettings;
+  grading: GradingScaleSettings;
+} {
+  let school = DEFAULT_SCHOOL_INFO;
+  let notifs = DEFAULT_NOTIFICATION_TEMPLATES;
+  let grading = DEFAULT_GRADING_SCALE;
+
+  if (typeof window !== 'undefined') {
+    try {
+      const s = localStorage.getItem('apex_erp_settings_schoolInfo');
+      if (s) school = { ...school, ...JSON.parse(s) };
+      const n = localStorage.getItem('apex_erp_settings_notificationTemplates');
+      if (n) notifs = { ...notifs, ...JSON.parse(n) };
+      const g = localStorage.getItem('apex_erp_settings_gradingScale');
+      if (g) grading = { ...grading, ...JSON.parse(g) };
+    } catch {}
+  }
+
+  return { school, notifs, grading };
+}
+
+function calculateDynamicGrade(percentage: number, grades: GradeBoundary[]): 'A+' | 'A' | 'B+' | 'B' | 'C' | 'F' {
+  const match = grades.find((g) => percentage >= g.minScore && percentage <= g.maxScore);
+  return (match?.grade as any) || (percentage >= 40 ? 'C' : 'F');
+}
+
 const STORAGE_KEYS = {
   STUDENTS: 'apex_erp_students_v5',
   BATCHES: 'apex_erp_batches_v5',
@@ -49,8 +112,11 @@ const STORAGE_KEYS = {
   EXAMS: 'apex_erp_exams_v5',
   MARKS: 'apex_erp_marks_v5',
   HOMEWORK: 'apex_erp_homework_v5',
+  HOMEWORK_SUBMISSIONS: 'apex_erp_hw_submissions_v5',
   MATERIALS: 'apex_erp_materials_v5',
   WHATSAPP: 'apex_erp_whatsapp_v5',
+  TIMETABLE: 'apex_erp_timetable_v5',
+  ANNOUNCEMENTS: 'apex_erp_announcements_v5',
 };
 
 export function normalizeStudent(s: any): Student {
@@ -78,7 +144,7 @@ export function normalizeTeacher(t: any): Teacher {
 }
 
 export function useERPStore(options?: { overrideScope?: boolean }) {
-  const { role, claims } = useAuth();
+  const { user, role, claims } = useAuth();
   const [isHydrated, setIsHydrated] = useState(false);
   const [students, setStudents] = useState<Student[]>(() => isFirebaseConfigured ? [] : INITIAL_STUDENTS.map(normalizeStudent));
   const [batches, setBatches] = useState<Batch[]>(() => isFirebaseConfigured ? [] : INITIAL_BATCHES);
@@ -88,8 +154,11 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
   const [exams, setExams] = useState<ExamTest[]>(() => isFirebaseConfigured ? [] : INITIAL_EXAMS);
   const [marks, setMarks] = useState<StudentExamMark[]>(() => isFirebaseConfigured ? [] : INITIAL_MARKS);
   const [homework, setHomework] = useState<Homework[]>(() => isFirebaseConfigured ? [] : INITIAL_HOMEWORK);
+  const [submissions, setSubmissions] = useState<HomeworkSubmission[]>([]);
   const [materials, setMaterials] = useState<StudyMaterial[]>(() => isFirebaseConfigured ? [] : INITIAL_STUDY_MATERIALS);
   const [whatsappLogs, setWhatsappLogs] = useState<WhatsAppMessage[]>(() => isFirebaseConfigured ? [] : INITIAL_WHATSAPP_LOGS);
+  const [timetableSlots, setTimetableSlots] = useState<TimetableSlot[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
 
   // Track active Firestore subscription teardowns
   const unsubscribersRef = useRef<(() => void)[]>([]);
@@ -121,11 +190,20 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
       const savedHw = localStorage.getItem(STORAGE_KEYS.HOMEWORK);
       if (savedHw) setHomework(JSON.parse(savedHw));
 
+      const savedSubmissions = localStorage.getItem(STORAGE_KEYS.HOMEWORK_SUBMISSIONS);
+      if (savedSubmissions) setSubmissions(JSON.parse(savedSubmissions));
+
       const savedMat = localStorage.getItem(STORAGE_KEYS.MATERIALS);
       if (savedMat) setMaterials(JSON.parse(savedMat));
 
       const savedWhatsapp = localStorage.getItem(STORAGE_KEYS.WHATSAPP);
       if (savedWhatsapp) setWhatsappLogs(JSON.parse(savedWhatsapp));
+
+      const savedTimetable = localStorage.getItem(STORAGE_KEYS.TIMETABLE);
+      if (savedTimetable) setTimetableSlots(JSON.parse(savedTimetable));
+
+      const savedAnnouncements = localStorage.getItem(STORAGE_KEYS.ANNOUNCEMENTS);
+      if (savedAnnouncements) setAnnouncements(JSON.parse(savedAnnouncements));
     } catch (e) {
       console.warn('[ERPStore] Failed to load store from localStorage', e);
     }
@@ -156,6 +234,7 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
         subscribeToCollection<ExamTest>('exams', (items) => setExams(items)),
         subscribeToCollection<StudentExamMark>('marks', (items) => setMarks(items)),
         subscribeToCollection<Homework>('homework', (items) => setHomework(items)),
+        subscribeToCollection<HomeworkSubmission>('homeworkSubmissions', (items) => setSubmissions(items)),
         subscribeToCollection<StudyMaterial>('materials', (items) => setMaterials(items))
       );
       // Teachers have zero access to installments & whatsapp logs
@@ -164,7 +243,6 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
     } else if (role === 'student' && isScopeRestricted) {
       const studentId = claims && 'studentId' in claims ? claims.studentId : '';
 
-      const markConstraints = studentId ? [where('studentId', '==', studentId)] : [];
       const installmentConstraints = studentId ? [where('studentId', '==', studentId)] : [];
 
       unsubs.push(
@@ -173,8 +251,9 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
         subscribeToCollection<FeeInstallment>('installments', (items) => setInstallments(items), undefined, installmentConstraints),
         subscribeToCollection<BatchAttendance>('attendance', (items) => setAttendance(items)),
         subscribeToCollection<ExamTest>('exams', (items) => setExams(items)),
-        subscribeToCollection<StudentExamMark>('marks', (items) => setMarks(items), undefined, markConstraints),
+        subscribeToCollection<StudentExamMark>('marks', (items) => setMarks(items)),
         subscribeToCollection<Homework>('homework', (items) => setHomework(items)),
+        subscribeToCollection<HomeworkSubmission>('homeworkSubmissions', (items) => setSubmissions(items)),
         subscribeToCollection<StudyMaterial>('materials', (items) => setMaterials(items))
       );
       setWhatsappLogs([]);
@@ -191,6 +270,7 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
         subscribeToCollection<ExamTest>('exams', (items) => setExams(items)),
         subscribeToCollection<StudentExamMark>('marks', (items) => setMarks(items), undefined, childConstraints),
         subscribeToCollection<Homework>('homework', (items) => setHomework(items)),
+        subscribeToCollection<HomeworkSubmission>('homeworkSubmissions', (items) => setSubmissions(items), undefined, childConstraints),
         subscribeToCollection<StudyMaterial>('materials', (items) => setMaterials(items))
       );
       setWhatsappLogs([]);
@@ -205,8 +285,11 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
         subscribeToCollection<ExamTest>('exams', (items) => setExams(items)),
         subscribeToCollection<StudentExamMark>('marks', (items) => setMarks(items)),
         subscribeToCollection<Homework>('homework', (items) => setHomework(items)),
+        subscribeToCollection<HomeworkSubmission>('homeworkSubmissions', (items) => setSubmissions(items)),
         subscribeToCollection<StudyMaterial>('materials', (items) => setMaterials(items)),
-        subscribeToCollection<WhatsAppMessage>('whatsapp_logs', (items) => setWhatsappLogs(items))
+        subscribeToCollection<WhatsAppMessage>('whatsapp_logs', (items) => setWhatsappLogs(items)),
+        subscribeToCollection<TimetableSlot>('timetableSlots', (items) => setTimetableSlots(items)),
+        subscribeToCollection<Announcement>('announcements', (items) => setAnnouncements(items))
       );
     }
 
@@ -229,44 +312,76 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
       localStorage.setItem(STORAGE_KEYS.EXAMS, JSON.stringify(exams));
       localStorage.setItem(STORAGE_KEYS.MARKS, JSON.stringify(marks));
       localStorage.setItem(STORAGE_KEYS.HOMEWORK, JSON.stringify(homework));
+      localStorage.setItem(STORAGE_KEYS.HOMEWORK_SUBMISSIONS, JSON.stringify(submissions));
       localStorage.setItem(STORAGE_KEYS.MATERIALS, JSON.stringify(materials));
       localStorage.setItem(STORAGE_KEYS.WHATSAPP, JSON.stringify(whatsappLogs));
+      localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(announcements));
     } catch (e) {
       console.warn('[ERPStore] Failed to save to localStorage', e);
     }
-  }, [students, batches, teachers, installments, attendance, exams, marks, homework, materials, whatsappLogs, isHydrated]);
+  }, [students, batches, teachers, installments, attendance, exams, marks, homework, submissions, materials, whatsappLogs, announcements, isHydrated]);
 
   // GLOBAL ID AVAILABILITY CHECKER
   const checkIdAvailability = async (idToCheck: string): Promise<{ available: boolean; reason?: string }> => {
-    const normalized = idToCheck.trim().toUpperCase();
+    const normalized = idToCheck?.trim().toUpperCase();
     if (!normalized) return { available: true };
 
-    // 1. Check local state
-    const studentConflict = students.find((s) => s.rollNo.toUpperCase() === normalized);
-    if (studentConflict) {
-      return { available: false, reason: `Assigned to student "${studentConflict.name}"` };
-    }
+    try {
+      // 1. Check local student records
+      const studentConflict = students.find(
+        (s) => (s.rollNo && s.rollNo.toUpperCase() === normalized) || (s.id && s.id.toUpperCase() === normalized)
+      );
+      if (studentConflict) {
+        return {
+          available: false,
+          reason: `This ID is already assigned to student "${studentConflict.name}" (${studentConflict.rollNo || studentConflict.id})`,
+        };
+      }
 
-    const teacherConflict = teachers.find((t) => t.facultyId?.toUpperCase() === normalized);
-    if (teacherConflict) {
-      return { available: false, reason: `Assigned to faculty "${teacherConflict.name}"` };
-    }
+      // 2. Check local faculty records
+      const teacherConflict = teachers.find(
+        (t) => (t.facultyId && t.facultyId.toUpperCase() === normalized) || (t.id && t.id.toUpperCase() === normalized)
+      );
+      if (teacherConflict) {
+        return {
+          available: false,
+          reason: `This ID is already assigned to faculty member "${teacherConflict.name}" (${teacherConflict.facultyId || teacherConflict.id})`,
+        };
+      }
 
-    const batchConflict = batches.find((b) => (b.batchCode || b.id).toUpperCase() === normalized);
-    if (batchConflict) {
-      return { available: false, reason: `Assigned to batch "${batchConflict.name}"` };
-    }
+      // 3. Check local batch records
+      const batchConflict = batches.find(
+        (b) => (b.batchCode && b.batchCode.toUpperCase() === normalized) || (b.id && b.id.toUpperCase() === normalized)
+      );
+      if (batchConflict) {
+        return {
+          available: false,
+          reason: `This ID is already assigned to batch "${batchConflict.name}" (${batchConflict.batchCode || batchConflict.id})`,
+        };
+      }
 
-    // 2. Check cloud Firestore member_ids
-    const cloudCheck = await checkMemberIdAvailable(normalized);
-    if (!cloudCheck.available) {
-      return {
-        available: false,
-        reason: `Assigned to a ${cloudCheck.existingMemberType} (${cloudCheck.existingName})`,
-      };
-    }
+      // 4. Check cloud Firestore member_ids
+      const cloudCheck = await checkMemberIdAvailable(normalized);
+      if (!cloudCheck.available) {
+        const typeLabel =
+          cloudCheck.existingMemberType === 'faculty'
+            ? 'faculty member'
+            : cloudCheck.existingMemberType === 'student'
+            ? 'student'
+            : cloudCheck.existingMemberType === 'batch'
+            ? 'batch'
+            : 'member';
+        return {
+          available: false,
+          reason: `This ID is already assigned to ${typeLabel} "${cloudCheck.existingName || normalized}"`,
+        };
+      }
 
-    return { available: true };
+      return { available: true };
+    } catch (err) {
+      console.warn('[checkIdAvailability] Check error, falling back to local verification:', err);
+      return { available: true };
+    }
   };
 
   // STUDENT ACTIONS
@@ -361,10 +476,24 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
   };
 
   const updateStudent = async (id: string, updates: Partial<Student>) => {
+    const previousStudent = students.find((s) => s.id === id);
     // Optimistic update
     setStudents((prev) => prev.map((s) => (s.id === id ? { ...s, ...updates } : s)));
     try {
       await updateFirestoreDoc('students', id, updates);
+      if (previousStudent) {
+        await logAuditEvent({
+          actorId: user?.uid || 'admin-session',
+          actorEmail: user?.email || 'admin@apexacademy.edu',
+          actorRole: (role as any) || 'admin',
+          action: 'STUDENT_RECORD_EDIT',
+          targetType: 'student',
+          targetId: id,
+          targetName: updates.name || previousStudent.name,
+          before: previousStudent,
+          after: { ...previousStudent, ...updates },
+        });
+      }
     } catch (err) {
       console.error('[ERPStore] Failed to update student in Firestore:', err);
     }
@@ -549,6 +678,7 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
   };
 
   const updateTeacher = async (id: string, updates: Partial<Teacher>) => {
+    const previousTeacher = teachers.find((t) => t.id === id);
     setTeachers((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
 
     if (updates.name) {
@@ -559,6 +689,19 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
 
     try {
       await updateFirestoreDoc('teachers', id, updates);
+      if (previousTeacher) {
+        await logAuditEvent({
+          actorId: user?.uid || 'admin-session',
+          actorEmail: user?.email || 'admin@apexacademy.edu',
+          actorRole: (role as any) || 'admin',
+          action: 'FACULTY_RECORD_EDIT',
+          targetType: 'faculty',
+          targetId: id,
+          targetName: updates.name || previousTeacher.name,
+          before: previousTeacher,
+          after: { ...previousTeacher, ...updates },
+        });
+      }
     } catch (err) {
       console.error('[ERPStore] Failed to update teacher in Firestore:', err);
     }
@@ -585,13 +728,16 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
     batchId: string,
     date: string,
     records: AttendanceRecord[],
-    markedBy: string
+    markedBy: string,
+    submissionStatus: 'draft' | 'final' = 'final',
+    reason?: string
   ) => {
     const batch = batches.find((b) => b.id === batchId);
     const batchName = batch ? batch.name : 'Classroom Batch';
 
     const presentCount = records.filter((r) => r.status === 'present').length;
     const absentCount = records.filter((r) => r.status === 'absent').length;
+    const nowISO = new Date().toISOString();
 
     const id = `att-${batchId}-${date}`;
     const newAttendanceEntry: BatchAttendance = {
@@ -602,9 +748,12 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
       markedBy,
       markedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       records,
-      whatsappDispatched: true,
+      whatsappDispatched: submissionStatus === 'final',
       presentCount,
       absentCount,
+      status: submissionStatus,
+      submittedAt: submissionStatus === 'final' ? nowISO : undefined,
+      lastEditedAt: nowISO,
     };
 
     // Optimistic attendance update
@@ -613,61 +762,84 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
       return [newAttendanceEntry, ...filtered];
     });
 
-    // 1. Direct Attendance Document Write to Firestore + API route fallback
+    // 1. Server API Call for Role & Lock Enforcement
     try {
-      await createFirestoreDoc('attendance', id, newAttendanceEntry);
-      fetch('/api/attendance', {
+      const response = await fetch('/api/attendance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newAttendanceEntry),
-      }).catch(() => {});
-    } catch (err) {
-      console.warn('[ERPStore] Direct Firestore write failed, using server API fallback...', err);
-      try {
-        await fetch('/api/attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newAttendanceEntry),
-        });
-      } catch (apiErr) {
-        console.error('[ERPStore] Server API attendance save failed:', apiErr);
+        body: JSON.stringify({
+          batchId,
+          batchName,
+          date,
+          records,
+          markedBy,
+          status: submissionStatus,
+          reason,
+          presentCount,
+          absentCount,
+        }),
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || `Failed to save attendance (${response.status})`);
       }
+    } catch (apiErr) {
+      console.warn('[ERPStore] Attendance API call failed, attempting direct Firestore write...', apiErr);
+      try {
+        await createFirestoreDoc('attendance', id, newAttendanceEntry);
+      } catch (err) {
+        console.error('[ERPStore] Direct Firestore attendance write also failed:', err);
+      }
+      throw apiErr;
     }
 
-    // 2. Dispatch Parent WhatsApp Absence Alerts
+    // 2. Dispatch Parent WhatsApp Absence Alerts for Final Submissions
     const newWhatsappAlerts: WhatsAppMessage[] = [];
-    const formattedDate = new Date(date).toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
+    if (submissionStatus === 'final') {
+      const formattedDate = new Date(date).toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      });
 
-    records.forEach((rec) => {
-      if (rec.status === 'absent') {
-        const student = students.find((s) => s.id === rec.studentId || s.rollNo === rec.studentId);
-        if (student) {
-          const waId = `wa-abs-${Date.now()}-${student.id}`;
-          const waMsg: WhatsAppMessage = {
-            id: waId,
-            recipientName: `${student.parentName} (Parent of ${student.name})`,
-            recipientPhone: student.parentPhone,
-            recipientRole: 'parent',
-            type: 'absence_alert',
-            content: `🚨 *Apex Academy Attendance Alert*\n\nDear ${student.parentName},\nThis is to notify you that *${student.name}* was marked *ABSENT* for *${batchName}* today (${formattedDate}) at ${newAttendanceEntry.markedAt}.\n\n${rec.remarks ? `Note from Faculty: "${rec.remarks}"\n\n` : ''}For any queries or leave notifications, contact front-desk at +91 98765 00000.`,
-            status: 'delivered',
-            timestamp: `Today, ${newAttendanceEntry.markedAt}`,
-            meta: { studentName: student.name, batchName },
-          };
-          newWhatsappAlerts.push(waMsg);
-          createFirestoreDoc('whatsapp_logs', waId, waMsg).catch((e) =>
-            console.warn('[ERPStore] WhatsApp log async write failed:', e)
-          );
+      const { school, notifs } = getStoreSettings();
+
+      records.forEach((rec) => {
+        if (rec.status === 'absent') {
+          const student = students.find((s) => s.id === rec.studentId || s.rollNo === rec.studentId);
+          if (student) {
+            const waId = `wa-abs-${Date.now()}-${student.id}`;
+            const messageContent = interpolateTemplate(notifs.templates.absenceAlert.bodyTemplate, {
+              studentName: student.name,
+              date: formattedDate,
+              batchName,
+              schoolName: school.institutionName,
+              schoolPhone: school.phone,
+            });
+
+            const waMsg: WhatsAppMessage = {
+              id: waId,
+              recipientName: `${student.parentName} (Parent of ${student.name})`,
+              recipientPhone: student.parentPhone,
+              recipientRole: 'parent',
+              type: 'absence_alert',
+              content: `🚨 *${school.institutionName} Attendance Alert*\n\n${messageContent}${rec.remarks ? `\n\nNote from Faculty: "${rec.remarks}"` : ''}`,
+              status: 'delivered',
+              timestamp: `Today, ${newAttendanceEntry.markedAt}`,
+              meta: { studentName: student.name, batchName },
+            };
+            newWhatsappAlerts.push(waMsg);
+            createFirestoreDoc('whatsapp_logs', waId, waMsg).catch((e) =>
+              console.warn('[ERPStore] WhatsApp log async write failed:', e)
+            );
+          }
         }
-      }
-    });
+      });
 
-    if (newWhatsappAlerts.length > 0) {
-      setWhatsappLogs((prev) => [...newWhatsappAlerts, ...prev]);
+      if (newWhatsappAlerts.length > 0) {
+        setWhatsappLogs((prev) => [...newWhatsappAlerts, ...prev]);
+      }
     }
 
     return { presentCount, absentCount, alertsSent: newWhatsappAlerts.length };
@@ -695,10 +867,14 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
 
   const saveExamMarks = async (
     examId: string,
-    marksData: { studentId: string; marksObtained: number; remarks?: string }[]
+    marksData: { studentId: string; marksObtained: number; teacherRemarks?: string; remarks?: string }[],
+    submissionStatus: 'draft' | 'final' = 'final',
+    reason?: string
   ) => {
     const exam = exams.find((e) => e.id === examId);
     if (!exam) return;
+
+    const { school, notifs, grading } = getStoreSettings();
 
     const sortedByScore = [...marksData].sort((a, b) => b.marksObtained - a.marksObtained);
     const totalStudents = marksData.length;
@@ -707,14 +883,16 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
     const averageMark = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
 
     const operations: BatchOperation[] = [];
+    const nowISO = new Date().toISOString();
 
     const newMarksEntries: StudentExamMark[] = sortedByScore.map((entry, idx) => {
       const student = students.find((s) => s.id === entry.studentId);
       const studentName = student ? student.name : 'Unknown';
       const percentage = exam.totalMarks > 0 ? Math.round((entry.marksObtained / exam.totalMarks) * 100) : 0;
       const rank = idx + 1;
-      const percentile = totalStudents > 1 ? Math.round(((totalStudents - rank) / (totalStudents - 1)) * 100) : 100;
+      const calculatedGrade = calculateDynamicGrade(percentage, grading.grades);
       const markId = `mark-${examId}-${entry.studentId}`;
+      const remarks = entry.teacherRemarks || entry.remarks || '';
 
       const markRecord: StudentExamMark = {
         id: markId,
@@ -726,9 +904,12 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
         totalMarks: exam.totalMarks,
         percentage,
         rank,
-        grade: percentage >= 90 ? 'A+' : percentage >= 80 ? 'A' : percentage >= 70 ? 'B+' : percentage >= 60 ? 'B' : percentage >= 40 ? 'C' : 'F',
-        teacherRemarks: entry.remarks,
-        whatsappSent: true,
+        grade: calculatedGrade,
+        teacherRemarks: remarks,
+        whatsappSent: submissionStatus === 'final',
+        status: submissionStatus,
+        submittedAt: submissionStatus === 'final' ? nowISO : undefined,
+        lastEditedAt: nowISO,
       };
 
       operations.push({ type: 'set', collection: 'marks', id: markId, data: markRecord });
@@ -736,9 +917,12 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
     });
 
     const updatedExamUpdates = {
-      status: 'evaluated' as const,
+      status: (submissionStatus === 'final' ? 'evaluated' : 'draft') as any,
+      marksStatus: submissionStatus,
       highestScore: highestMark,
       averageScore: averageMark,
+      marksLastEditedAt: nowISO,
+      ...(submissionStatus === 'final' ? { marksSubmittedAt: nowISO } : {}),
     };
     operations.push({ type: 'update', collection: 'exams', id: examId, data: updatedExamUpdates });
 
@@ -752,46 +936,88 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
       prev.map((e) => (e.id === examId ? { ...e, ...updatedExamUpdates } : e))
     );
 
-    // Auto WhatsApp Result notifications
-    const whatsappReports: WhatsAppMessage[] = [];
-    newMarksEntries.forEach((m) => {
-      const student = students.find((s) => s.id === m.studentId);
-      if (student) {
-        const waId = `wa-res-${Date.now()}-${student.id}`;
-        const waMsg: WhatsAppMessage = {
-          id: waId,
-          recipientName: `${student.parentName} (Parent of ${student.name})`,
-          recipientPhone: student.parentPhone,
-          recipientRole: 'parent',
-          type: 'report_card',
-          content: `📊 *Apex Academy Test Result Published*\n\nDear ${student.parentName},\nResult for *${exam.title}* (${exam.subject}):\n• Student: *${student.name}*\n• Score: *${m.marksObtained}/${m.totalMarks}* (${m.percentage}%)\n• Batch Rank: *#${m.rank}*\n• Grade: *${m.grade}*\n• Batch Average: ${averageMark}/${exam.totalMarks}\n\nView full analysis & solution key on Parent Portal: https://apexerp.co/parent/portal`,
-          status: 'delivered',
-          timestamp: 'Just now',
-          meta: { studentName: student.name, batchName: exam.batchName, pdfType: 'Exam Result' },
-        };
-        whatsappReports.push(waMsg);
-        operations.push({ type: 'set', collection: 'whatsapp_logs', id: waId, data: waMsg });
-      }
-    });
+    // Call server-side API for validation, strict locking, and audit logging
+    try {
+      const response = await fetch('/api/marks/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          examId,
+          status: submissionStatus,
+          reason,
+          marksData: marksData.map((m) => ({
+            studentId: m.studentId,
+            marksObtained: m.marksObtained,
+            teacherRemarks: m.teacherRemarks || m.remarks,
+          })),
+        }),
+      });
 
-    if (whatsappReports.length > 0) {
-      setWhatsappLogs((prev) => [...whatsappReports, ...prev]);
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || `Failed to save marks (${response.status})`);
+      }
+    } catch (apiErr) {
+      console.warn('[ERPStore] API /api/marks/save call notice:', apiErr);
+      // Fallback local Firestore batch write if API call was bypassed or network error
+      try {
+        await batchWrite(operations);
+      } catch (err) {
+        console.error('[ERPStore] Failed to save exam marks to Firestore:', err);
+      }
+      throw apiErr;
     }
 
-    try {
-      await batchWrite(operations);
-    } catch (err) {
-      console.error('[ERPStore] Failed to save exam marks to Firestore:', err);
+    // Auto WhatsApp Result notifications for final submission
+    if (submissionStatus === 'final') {
+      const whatsappReports: WhatsAppMessage[] = [];
+      newMarksEntries.forEach((m) => {
+        const student = students.find((s) => s.id === m.studentId);
+        if (student) {
+          const waId = `wa-res-${Date.now()}-${student.id}`;
+          const templateContent = interpolateTemplate(notifs.templates.reportCard.bodyTemplate, {
+            studentName: student.name,
+            examTitle: exam.title,
+            subject: exam.subject,
+            marksObtained: m.marksObtained,
+            totalMarks: exam.totalMarks,
+            percentage: m.percentage,
+            grade: m.grade,
+            rank: m.rank,
+            schoolName: school.institutionName,
+            teacherRemarks: m.teacherRemarks,
+          });
+
+          const waMsg: WhatsAppMessage = {
+            id: waId,
+            recipientName: `${student.parentName} (Parent of ${student.name})`,
+            recipientPhone: student.parentPhone,
+            recipientRole: 'parent',
+            type: 'report_card',
+            content: `📊 *${school.institutionName} Scorecard Declared*\n\n${templateContent}\n\n• Batch Average: ${averageMark}/${exam.totalMarks}`,
+            status: 'delivered',
+            timestamp: 'Just now',
+            meta: { studentName: student.name, batchName: exam.batchName, pdfType: 'Exam Result' },
+          };
+          whatsappReports.push(waMsg);
+          operations.push({ type: 'set', collection: 'whatsapp_logs', id: waId, data: waMsg });
+        }
+      });
+
+      if (whatsappReports.length > 0) {
+        setWhatsappLogs((prev) => [...whatsappReports, ...prev]);
+      }
     }
   };
 
   // HOMEWORK & ASSIGNMENTS
-  const addHomework = async (newHw: Omit<Homework, 'id' | 'submissionCount'>) => {
-    const id = `hw-${Date.now()}`;
+  const addHomework = async (newHw: Omit<Homework, 'submissionCount'> & { id?: string }) => {
+    const id = newHw.id || `hw-${Date.now()}`;
     const hwEntry: Homework = {
       ...newHw,
       id,
       submissionCount: 0,
+      assignedAt: newHw.assignedAt || new Date().toISOString(),
     };
 
     setHomework((prev) => [hwEntry, ...prev]);
@@ -803,6 +1029,66 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
     }
 
     return hwEntry;
+  };
+
+  const deleteHomework = async (homeworkId: string) => {
+    setHomework((prev) => prev.filter((h) => h.id !== homeworkId));
+    try {
+      await deleteFirestoreDoc('homework', homeworkId);
+    } catch (err) {
+      console.error('[ERPStore] Failed to delete homework from Firestore:', err);
+    }
+  };
+
+  // HOMEWORK SUBMISSIONS
+  const submitHomework = async (input: SubmitHomeworkInput) => {
+    const record = await submitHomeworkRecord(input);
+    setSubmissions((prev) => {
+      const idx = prev.findIndex((s) => s.id === record.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = record;
+        return copy;
+      }
+      return [record, ...prev];
+    });
+    setHomework((prev) =>
+      prev.map((hw) =>
+        hw.id === input.assignmentId
+          ? { ...hw, submissionCount: (hw.submissionCount || 0) + 1 }
+          : hw
+      )
+    );
+    return record;
+  };
+
+  const gradeSubmission = async (input: GradeSubmissionInput) => {
+    const updated = await gradeHomeworkSubmissionRecord(input);
+    setSubmissions((prev) =>
+      prev.map((s) => (s.id === updated.id ? updated : s))
+    );
+    return updated;
+  };
+
+  // STUDENT PROGRESS & ACADEMIC AGGREGATIONS (PHASE 7)
+  const studentProgressList = useMemo(() => {
+    return computeAllStudentsProgress(
+      students,
+      batches,
+      marks,
+      exams,
+      attendance,
+      homework,
+      submissions
+    );
+  }, [students, batches, marks, exams, attendance, homework, submissions]);
+
+  const getStudentProgress = (studentId: string) => {
+    return studentProgressList.find((p) => p.studentId === studentId);
+  };
+
+  const getBatchProgress = (batchId: string): BatchProgressSummary => {
+    return computeBatchProgressSummary(batchId, studentProgressList);
   };
 
   // WHATSAPP BROADCASTS
@@ -859,10 +1145,248 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
     try {
       await batchWrite(operations);
     } catch (err) {
-      console.error('[ERPStore] Failed to save broadcast logs in Firestore:', err);
+      console.error('[ERPStore] Failed to dispatch WhatsApp broadcasts to Firestore:', err);
     }
 
     return newLogs.length;
+  };
+
+  // ANNOUNCEMENTS (PHASE 9)
+  const addAnnouncement = async (
+    data: Partial<Announcement>,
+    status: 'draft' | 'sent' = 'sent'
+  ): Promise<{
+    success: boolean;
+    announcement?: Announcement;
+    recipientCount: number;
+    inAppCount: number;
+    whatsappCount: number;
+    failedCount: number;
+    error?: string;
+  }> => {
+    const validation = validateAnnouncement({
+      ...data,
+      status,
+      senderId: data.senderId || (claims && 'uid' in claims ? (claims as any).uid : 'admin-001'),
+      senderName: data.senderName || (role === 'admin' ? 'Apex Administration' : 'Faculty Member'),
+      senderRole: role === 'teacher' ? 'teacher' : 'admin',
+    });
+
+    if (!validation.valid || !validation.sanitized) {
+      throw new Error(validation.errors.join(' '));
+    }
+
+    const newAnnouncement = validation.sanitized;
+    setAnnouncements((prev) => [newAnnouncement, ...prev]);
+
+    // Calculate in-app recipient count
+    let inAppCount = 0;
+    if (newAnnouncement.audienceType === 'all') {
+      inAppCount = students.length + teachers.length;
+    } else if (newAnnouncement.audienceType === 'batch') {
+      const targetedStudents = students.filter((s) => (s.batchIds || []).some((bId) => newAnnouncement.audienceIds.includes(bId)));
+      inAppCount = targetedStudents.length;
+    } else if (newAnnouncement.audienceType === 'individual') {
+      inAppCount = newAnnouncement.audienceIds.length;
+    }
+
+    let whatsappCount = 0;
+    let failedCount = 0;
+
+    // If channel includes whatsapp and status === 'sent', dispatch broadcast logs
+    if (status === 'sent' && newAnnouncement.channels.includes('whatsapp')) {
+      try {
+        const newLogs: WhatsAppMessage[] = [];
+        const operations: BatchOperation[] = [];
+        const headerAndBody = `📢 *Apex Academy Announcement: ${newAnnouncement.title}*\n\n${newAnnouncement.message}`;
+
+        if (newAnnouncement.audienceType === 'all') {
+          // Dispatch to all active students (parent contact)
+          students.forEach((st) => {
+            const waId = `wa-ann-${Date.now()}-${st.id}`;
+            const customizedContent = headerAndBody
+              .replace(/{student_name}/g, st.name)
+              .replace(/{parent_name}/g, st.parentName || st.name)
+              .replace(/{roll_no}/g, st.rollNo || '');
+
+            const msg: WhatsAppMessage = {
+              id: waId,
+              recipientName: `${st.parentName || st.name} (${st.name})`,
+              recipientPhone: st.parentPhone || st.phone || '',
+              recipientRole: 'parent',
+              type: 'broadcast',
+              content: customizedContent,
+              status: 'delivered',
+              timestamp: 'Just now',
+              meta: {
+                announcementId: newAnnouncement.id,
+                announcementTitle: newAnnouncement.title,
+                studentName: st.name,
+                priority: newAnnouncement.priority,
+              },
+            };
+            newLogs.push(msg);
+            operations.push({ type: 'set', collection: 'whatsapp_logs', id: waId, data: msg });
+          });
+
+          // Dispatch to all faculty members
+          teachers.forEach((tch) => {
+            const waId = `wa-ann-${Date.now()}-${tch.id}`;
+            const customizedContent = headerAndBody
+              .replace(/{student_name}/g, tch.name)
+              .replace(/{parent_name}/g, tch.name)
+              .replace(/{roll_no}/g, tch.facultyId || 'Faculty');
+
+            const msg: WhatsAppMessage = {
+              id: waId,
+              recipientName: tch.name,
+              recipientPhone: tch.phone || '',
+              recipientRole: 'parent',
+              type: 'broadcast',
+              content: customizedContent,
+              status: 'delivered',
+              timestamp: 'Just now',
+              meta: {
+                announcementId: newAnnouncement.id,
+                announcementTitle: newAnnouncement.title,
+                priority: newAnnouncement.priority,
+              },
+            };
+            newLogs.push(msg);
+            operations.push({ type: 'set', collection: 'whatsapp_logs', id: waId, data: msg });
+          });
+        } else if (newAnnouncement.audienceType === 'batch') {
+          // Deduplicate students enrolled in target batches
+          const targetStudents = students.filter((s) =>
+            (s.batchIds || []).some((bId) => newAnnouncement.audienceIds.includes(bId))
+          );
+
+          targetStudents.forEach((st) => {
+            const waId = `wa-ann-${Date.now()}-${st.id}`;
+            const customizedContent = headerAndBody
+              .replace(/{student_name}/g, st.name)
+              .replace(/{parent_name}/g, st.parentName || st.name)
+              .replace(/{roll_no}/g, st.rollNo || '');
+
+            const msg: WhatsAppMessage = {
+              id: waId,
+              recipientName: `${st.parentName || st.name} (${st.name})`,
+              recipientPhone: st.parentPhone || st.phone || '',
+              recipientRole: 'parent',
+              type: 'broadcast',
+              content: customizedContent,
+              status: 'delivered',
+              timestamp: 'Just now',
+              meta: {
+                announcementId: newAnnouncement.id,
+                announcementTitle: newAnnouncement.title,
+                studentName: st.name,
+                priority: newAnnouncement.priority,
+              },
+            };
+            newLogs.push(msg);
+            operations.push({ type: 'set', collection: 'whatsapp_logs', id: waId, data: msg });
+          });
+        } else if (newAnnouncement.audienceType === 'individual') {
+          newAnnouncement.audienceIds.forEach((id) => {
+            const student = students.find((s) => s.id === id);
+            const teacher = teachers.find((t) => t.id === id);
+
+            if (student) {
+              const waId = `wa-ann-${Date.now()}-${student.id}`;
+              const customizedContent = headerAndBody
+                .replace(/{student_name}/g, student.name)
+                .replace(/{parent_name}/g, student.parentName || student.name)
+                .replace(/{roll_no}/g, student.rollNo || '');
+
+              const msg: WhatsAppMessage = {
+                id: waId,
+                recipientName: `${student.parentName || student.name} (${student.name})`,
+                recipientPhone: student.parentPhone || student.phone || '',
+                recipientRole: 'parent',
+                type: 'broadcast',
+                content: customizedContent,
+                status: 'delivered',
+                timestamp: 'Just now',
+                meta: {
+                  announcementId: newAnnouncement.id,
+                  announcementTitle: newAnnouncement.title,
+                  studentName: student.name,
+                  priority: newAnnouncement.priority,
+                },
+              };
+              newLogs.push(msg);
+              operations.push({ type: 'set', collection: 'whatsapp_logs', id: waId, data: msg });
+            } else if (teacher) {
+              const waId = `wa-ann-${Date.now()}-${teacher.id}`;
+              const customizedContent = headerAndBody
+                .replace(/{student_name}/g, teacher.name)
+                .replace(/{parent_name}/g, teacher.name)
+                .replace(/{roll_no}/g, teacher.facultyId || 'Faculty');
+
+              const msg: WhatsAppMessage = {
+                id: waId,
+                recipientName: teacher.name,
+                recipientPhone: teacher.phone || '',
+                recipientRole: 'parent',
+                type: 'broadcast',
+                content: customizedContent,
+                status: 'delivered',
+                timestamp: 'Just now',
+                meta: {
+                  announcementId: newAnnouncement.id,
+                  announcementTitle: newAnnouncement.title,
+                  priority: newAnnouncement.priority,
+                },
+              };
+              newLogs.push(msg);
+              operations.push({ type: 'set', collection: 'whatsapp_logs', id: waId, data: msg });
+            } else {
+              failedCount++;
+            }
+          });
+        }
+
+        if (newLogs.length > 0) {
+          setWhatsappLogs((prev) => [...newLogs, ...prev]);
+          if (operations.length > 0) {
+            await batchWrite(operations).catch((err) => {
+              console.warn('[ERPStore] Batch write to whatsapp_logs warning:', err);
+            });
+          }
+          whatsappCount = newLogs.length;
+        }
+      } catch (err) {
+        console.warn('[ERPStore] WhatsApp broadcast dispatch notice:', err);
+        failedCount++;
+      }
+    }
+
+    try {
+      await createFirestoreDoc('announcements', newAnnouncement.id, newAnnouncement);
+    } catch (err) {
+      console.error('[ERPStore] Failed to save announcement to Firestore:', err);
+    }
+
+    const totalRecipients = Math.max(1, inAppCount);
+
+    return {
+      success: true,
+      announcement: newAnnouncement,
+      recipientCount: totalRecipients,
+      inAppCount,
+      whatsappCount,
+      failedCount,
+    };
+  };
+
+  const deleteAnnouncement = async (announcementId: string) => {
+    setAnnouncements((prev) => prev.filter((a) => a.id !== announcementId));
+    try {
+      await deleteFirestoreDoc('announcements', announcementId);
+    } catch (err) {
+      console.error('[ERPStore] Failed to delete announcement from Firestore:', err);
+    }
   };
 
   // FEE PAYMENT & RECEIPTING
@@ -897,14 +1421,27 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
     setInstallments((prev) => prev.map((i) => (i.id === installmentId ? updatedInst : i)));
     setStudents((prev) => prev.map((s) => (s.id === student.id ? { ...s, ...studentUpdates } : s)));
 
+    const { school, notifs } = getStoreSettings();
+
     const waId = `wa-rec-${Date.now()}-${student.id}`;
+    const paymentReceiptTemplate = interpolateTemplate(notifs.templates.paymentReceipt.bodyTemplate, {
+      amount: inst.amount.toLocaleString('en-IN'),
+      currencySymbol: school.currencySymbol || '₹',
+      studentName: student.name,
+      paymentMode,
+      transactionId: updatedInst.transactionId,
+      receiptNumber,
+      receiptUrl: `https://apexerp.co/receipt/${receiptNumber}`,
+      schoolName: school.institutionName,
+    });
+
     const waMsg: WhatsAppMessage = {
       id: waId,
       recipientName: `${student.parentName} (Parent of ${student.name})`,
       recipientPhone: student.parentPhone,
       recipientRole: 'parent',
       type: 'payment_receipt',
-      content: `🧾 *Apex Academy Fee Receipt Confirmed*\n\nDear ${student.parentName},\nWe have successfully received *₹${inst.amount.toLocaleString('en-IN')}* for *${student.name}* (${inst.title}).\n• Receipt No: *${receiptNumber}*\n• Mode: *${paymentMode}*\n• Remaining Balance: *₹${newPendingFee.toLocaleString('en-IN')}*\n\nDownload official GST PDF Receipt: https://apexerp.co/receipt/${receiptNumber}`,
+      content: `🧾 *${school.institutionName} Payment Confirmed*\n\n${paymentReceiptTemplate}\n• Remaining Balance: ${school.currencySymbol || '₹'}${newPendingFee.toLocaleString('en-IN')}`,
       status: 'delivered',
       timestamp: 'Just now',
       meta: { studentName: student.name, amount: inst.amount, pdfType: 'Fee Receipt' },
@@ -921,6 +1458,18 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
 
     try {
       await batchWrite(operations);
+      await logAuditEvent({
+        actorId: user?.uid || 'admin-session',
+        actorEmail: user?.email || 'admin@apexacademy.edu',
+        actorRole: (role as any) || 'admin',
+        action: 'PAYMENT_STATUS_CHANGE',
+        targetType: 'payment',
+        targetId: installmentId,
+        targetName: `${student.name} - ${inst.title}`,
+        before: { status: inst.status, paidFee: student.paidFee, pendingFee: student.pendingFee },
+        after: { status: 'paid', paidFee: newPaidFee, pendingFee: newPendingFee, receiptNumber, paymentMode },
+        metadata: { receiptNumber, amount: inst.amount, paymentMode, studentId: student.id },
+      });
     } catch (err) {
       console.error('[ERPStore] Failed to record payment in Firestore:', err);
     }
@@ -934,14 +1483,26 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
     const student = students.find((s) => s.id === inst.studentId);
     if (!student) return;
 
+    const { school, notifs } = getStoreSettings();
+
     const waId = `wa-rem-${Date.now()}-${student.id}`;
+    const reminderTemplate = interpolateTemplate(notifs.templates.feeReminder.bodyTemplate, {
+      installmentTitle: inst.title,
+      amount: inst.amount.toLocaleString('en-IN'),
+      currencySymbol: school.currencySymbol || '₹',
+      studentName: student.name,
+      dueDate: inst.dueDate,
+      paymentLink: inst.paymentLink || 'https://pay.apexerp.co/quickpay',
+      schoolName: school.institutionName,
+    });
+
     const waMsg: WhatsAppMessage = {
       id: waId,
       recipientName: `${student.parentName} (Parent of ${student.name})`,
       recipientPhone: student.parentPhone,
       recipientRole: 'parent',
       type: 'fee_reminder',
-      content: `💳 *Apex Academy Fee Installment Reminder*\n\nDear ${student.parentName},\nThis is a gentle reminder that *${inst.title}* of *₹${inst.amount.toLocaleString('en-IN')}* for *${student.name}* is due on *${inst.dueDate}*.\n\nPay instantly with 1-click via UPI / NetBanking:\n${inst.paymentLink || 'https://pay.apexerp.co/quickpay'}\n\nImmediate digital receipt with GST will be issued upon payment confirmation.`,
+      content: `💳 *${school.institutionName} Fee Reminder*\n\n${reminderTemplate}\n\nImmediate digital receipt with tax invoice will be issued upon payment confirmation.`,
       status: 'delivered',
       timestamp: 'Just now',
       meta: { studentName: student.name, amount: inst.amount, paymentLink: inst.paymentLink },
@@ -956,6 +1517,146 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
     }
   };
 
+  const addTimetableSlot = async (
+    slotInput: TimetableSlotInput
+  ): Promise<{ success: boolean; conflict?: TimetableConflict; error?: string; slotId?: string }> => {
+    // 1. Field validation
+    const validation = validateTimetableSlotInput(slotInput);
+    if (!validation.valid) {
+      return { success: false, error: validation.errors[0] };
+    }
+
+    // 2. Conflict detection
+    const conflicts = detectTimetableConflicts(timetableSlots, slotInput);
+    if (conflicts.length > 0) {
+      return { success: false, conflict: conflicts[0], error: conflicts[0].message };
+    }
+
+    // 3. Construct persistent slot
+    const slotId = `slot-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+    const newSlot: TimetableSlot = {
+      id: slotId,
+      batchId: slotInput.batchId,
+      batchName: slotInput.batchName || '',
+      subjectId: slotInput.subjectId,
+      subjectName: slotInput.subjectName || slotInput.subjectId,
+      teacherId: slotInput.teacherId,
+      teacherName: slotInput.teacherName || '',
+      day: slotInput.day,
+      startTime: slotInput.startTime,
+      endTime: slotInput.endTime,
+      roomId: slotInput.roomId,
+      roomName: slotInput.roomName || slotInput.roomId,
+      color: slotInput.color || '#4f46e5',
+      academicYear: slotInput.academicYear || '2026-2027',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    setTimetableSlots((prev) => {
+      const updated = [...prev, newSlot];
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(STORAGE_KEYS.TIMETABLE, JSON.stringify(updated));
+      }
+      return updated;
+    });
+
+    if (isFirebaseConfigured) {
+      try {
+        await createFirestoreDoc('timetableSlots', slotId, newSlot);
+      } catch (err: any) {
+        console.error('[ERPStore] Failed to save timetable slot to Firestore:', err);
+      }
+    }
+
+    return { success: true, slotId };
+  };
+
+  const updateTimetableSlot = async (
+    id: string,
+    slotInput: Partial<TimetableSlotInput>
+  ): Promise<{ success: boolean; conflict?: TimetableConflict; error?: string }> => {
+    const existing = timetableSlots.find((s) => s.id === id);
+    if (!existing) {
+      return { success: false, error: 'Timetable slot not found.' };
+    }
+
+    const mergedInput: TimetableSlotInput & { id: string } = {
+      id,
+      batchId: slotInput.batchId || existing.batchId,
+      batchName: slotInput.batchName !== undefined ? slotInput.batchName : existing.batchName,
+      subjectId: slotInput.subjectId || existing.subjectId,
+      subjectName: slotInput.subjectName !== undefined ? slotInput.subjectName : existing.subjectName,
+      teacherId: slotInput.teacherId || existing.teacherId,
+      teacherName: slotInput.teacherName !== undefined ? slotInput.teacherName : existing.teacherName,
+      day: slotInput.day || existing.day,
+      startTime: slotInput.startTime || existing.startTime,
+      endTime: slotInput.endTime || existing.endTime,
+      roomId: slotInput.roomId || existing.roomId,
+      roomName: slotInput.roomName !== undefined ? slotInput.roomName : existing.roomName,
+      color: slotInput.color || existing.color,
+      academicYear: slotInput.academicYear || existing.academicYear,
+    };
+
+    // 1. Validation
+    const validation = validateTimetableSlotInput(mergedInput);
+    if (!validation.valid) {
+      return { success: false, error: validation.errors[0] };
+    }
+
+    // 2. Conflict detection with self-exclusion
+    const conflicts = detectTimetableConflicts(timetableSlots, mergedInput, id);
+    if (conflicts.length > 0) {
+      return { success: false, conflict: conflicts[0], error: conflicts[0].message };
+    }
+
+    const updatedSlot: TimetableSlot = {
+      ...existing,
+      ...mergedInput,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setTimetableSlots((prev) => {
+      const updated = prev.map((s) => (s.id === id ? updatedSlot : s));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(STORAGE_KEYS.TIMETABLE, JSON.stringify(updated));
+      }
+      return updated;
+    });
+
+    if (isFirebaseConfigured) {
+      try {
+        await updateFirestoreDoc('timetableSlots', id, updatedSlot);
+      } catch (err: any) {
+        console.error('[ERPStore] Failed to update timetable slot in Firestore:', err);
+      }
+    }
+
+    return { success: true };
+  };
+
+  const deleteTimetableSlot = async (id: string): Promise<{ success: boolean; error?: string }> => {
+    setTimetableSlots((prev) => {
+      const updated = prev.filter((s) => s.id !== id);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(STORAGE_KEYS.TIMETABLE, JSON.stringify(updated));
+      }
+      return updated;
+    });
+
+    if (isFirebaseConfigured) {
+      try {
+        await deleteFirestoreDoc('timetableSlots', id);
+      } catch (err: any) {
+        console.error('[ERPStore] Failed to delete timetable slot from Firestore:', err);
+      }
+    }
+
+    return { success: true };
+  };
+
   const resetToDefaults = () => {
     setStudents(INITIAL_STUDENTS);
     setBatches(INITIAL_BATCHES);
@@ -967,6 +1668,7 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
     setHomework(INITIAL_HOMEWORK);
     setMaterials(INITIAL_STUDY_MATERIALS);
     setWhatsappLogs(INITIAL_WHATSAPP_LOGS);
+    setTimetableSlots([]);
     localStorage.clear();
   };
 
@@ -980,8 +1682,14 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
     exams,
     marks,
     homework,
+    submissions,
     materials,
     whatsappLogs,
+    timetableSlots,
+    announcements,
+    studentProgressList,
+    getStudentProgress,
+    getBatchProgress,
     // Actions
     addStudent,
     updateStudent,
@@ -997,9 +1705,17 @@ export function useERPStore(options?: { overrideScope?: boolean }) {
     createExam,
     saveExamMarks,
     addHomework,
+    deleteHomework,
+    submitHomework,
+    gradeSubmission,
     sendBroadcastMessage,
+    addAnnouncement,
+    deleteAnnouncement,
     recordPayment,
     sendFeeReminder,
+    addTimetableSlot,
+    updateTimetableSlot,
+    deleteTimetableSlot,
     resetToDefaults,
   };
 }

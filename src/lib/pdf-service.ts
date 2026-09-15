@@ -1,6 +1,8 @@
 import jsPDF from 'jspdf';
 import autoTable, { UserOptions } from 'jspdf-autotable';
-import { Student, FeeInstallment, ExamTest, StudentExamMark } from './types';
+import { Student, FeeInstallment, ExamTest, StudentExamMark, SchoolInfoSettings, PayrollRecord, Teacher } from './types';
+import { DEFAULT_SCHOOL_INFO } from './settings-defaults';
+import { formatPaiseToINR } from './payroll-engine';
 
 // Extend jsPDF types for autoTable with proper UserOptions typing
 declare module 'jspdf' {
@@ -17,7 +19,30 @@ function addTable(doc: jsPDF, options: UserOptions): void {
   autoTable(doc, options);
 }
 
-export const generateFeeReceiptPDF = (student: Student, installment: FeeInstallment) => {
+/**
+ * Returns current SchoolInfo from argument, localStorage cache, or default fallback
+ */
+function getActiveSchoolInfo(override?: Partial<SchoolInfoSettings>): SchoolInfoSettings {
+  if (override && override.institutionName) {
+    return { ...DEFAULT_SCHOOL_INFO, ...override };
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('apex_erp_settings_schoolInfo');
+      if (raw) {
+        return { ...DEFAULT_SCHOOL_INFO, ...JSON.parse(raw) };
+      }
+    } catch {}
+  }
+  return DEFAULT_SCHOOL_INFO;
+}
+
+export const buildFeeReceiptDoc = (
+  student: Partial<Student> | Student,
+  installment: Partial<FeeInstallment> | FeeInstallment,
+  customSchoolInfo?: Partial<SchoolInfoSettings>
+): jsPDF => {
+  const school = getActiveSchoolInfo(customSchoolInfo);
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -30,14 +55,18 @@ export const generateFeeReceiptPDF = (student: Student, installment: FeeInstallm
 
   // Academy Name & Header
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(22);
+  doc.setFontSize(20);
   doc.setFont('helvetica', 'bold');
-  doc.text('APEX ACADEMY OF EXCELLENCE', 14, 18);
+  doc.text((school.institutionName || 'Apex Academy').toUpperCase(), 14, 18);
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text('Premier Coaching for IIT-JEE, NEET, Olympiads & CBSE Board Prep', 14, 25);
-  doc.text('Sector 62, Institutional Area, Noida | Helpline: +91 98765 00000 | info@apexacademy.edu', 14, 30);
+  doc.text(school.tagline || 'Excellence in Academic Coaching & Competitive Preparation', 14, 25);
+  doc.text(
+    `${school.address || 'Knowledge Park'}, ${school.city || 'Delhi NCR'} | Helpline: ${school.phone || '+91 9876543210'} | ${school.email || 'support@apexerp.com'}`,
+    14,
+    30
+  );
 
   // Title Box
   doc.setTextColor(30, 41, 59);
@@ -53,7 +82,7 @@ export const generateFeeReceiptPDF = (student: Student, installment: FeeInstallm
   doc.text(`Payment Mode: ${installment.paymentMode || 'UPI / Online'}`, 14, 68);
 
   doc.text(`Transaction Ref: ${installment.transactionId || 'TXN-' + Math.random().toString(36).substring(2, 9).toUpperCase()}`, 120, 56);
-  doc.text(`Academic Session: 2026-2027`, 120, 62);
+  doc.text(`Academic Session: ${school.academicYear || '2026-2027'}`, 120, 62);
   doc.text(`Status: COMPLETED (PAID)`, 120, 68);
 
   // Divider line
@@ -70,25 +99,26 @@ export const generateFeeReceiptPDF = (student: Student, installment: FeeInstallm
   doc.text('Student Details:', 18, 83);
 
   doc.setFont('helvetica', 'normal');
-  doc.text(`Student Name: ${student.name}`, 18, 90);
-  doc.text(`Roll Number: ${student.rollNo}`, 18, 96);
-  doc.text(`Parent / Guardian: ${student.parentName} (${student.parentRelation})`, 18, 102);
+  doc.text(`Student Name: ${student.name || 'Student'}`, 18, 90);
+  doc.text(`Roll Number: ${student.rollNo || 'N/A'}`, 18, 96);
+  doc.text(`Parent / Guardian: ${student.parentName || 'Parent / Guardian'} (${student.parentRelation || 'Guardian'})`, 18, 102);
 
-  doc.text(`Contact: ${student.phone}`, 115, 90);
-  doc.text(`Parent Contact: ${student.parentPhone}`, 115, 96);
-  doc.text(`School: ${student.schoolName}`, 115, 102);
+  doc.text(`Contact: ${student.phone || 'N/A'}`, 115, 90);
+  doc.text(`Parent Contact: ${student.parentPhone || 'N/A'}`, 115, 96);
+  doc.text(`School: ${student.schoolName || 'Apex Academy'}`, 115, 102);
 
   // Itemized Fee Table
+  const installmentAmount = Number(installment.amount) || 0;
   doc.autoTable({
     startY: 112,
     head: [['#', 'Description / Particulars', 'Due Date', 'Status', 'Amount (INR)']],
     body: [
       [
-        installment.installmentNo.toString(),
-        installment.title,
-        installment.dueDate,
+        (installment.installmentNo || 1).toString(),
+        installment.title || 'Tuition Fee Installment',
+        installment.dueDate || new Date().toISOString().split('T')[0],
         'PAID',
-        `INR ${installment.amount.toLocaleString('en-IN')}`,
+        `INR ${installmentAmount.toLocaleString('en-IN')}`,
       ],
     ],
     theme: 'grid',
@@ -110,21 +140,25 @@ export const generateFeeReceiptPDF = (student: Student, installment: FeeInstallm
     },
   });
 
-  const finalY = doc.lastAutoTable.finalY + 8;
+  const finalY = (doc.lastAutoTable?.finalY || 135) + 8;
 
   // Totals Box
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.text('Total Amount Received:', 115, finalY);
   doc.setTextColor(16, 185, 129); // Emerald
-  doc.text(`INR ${installment.amount.toLocaleString('en-IN')}`, 196, finalY, { align: 'right' });
+  doc.text(`INR ${installmentAmount.toLocaleString('en-IN')}`, 196, finalY, { align: 'right' });
 
   doc.setTextColor(30, 41, 59);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text(`Student Total Fee: INR ${student.totalFee.toLocaleString('en-IN')}`, 14, finalY);
-  doc.text(`Total Paid Till Date: INR ${student.paidFee.toLocaleString('en-IN')}`, 14, finalY + 5);
-  doc.text(`Remaining Balance: INR ${student.pendingFee.toLocaleString('en-IN')}`, 14, finalY + 10);
+  const totalFee = Number(student.totalFee) || 0;
+  const paidFee = Number(student.paidFee) || 0;
+  const pendingFee = Number(student.pendingFee) || 0;
+
+  doc.text(`Student Total Fee: INR ${totalFee.toLocaleString('en-IN')}`, 14, finalY);
+  doc.text(`Total Paid Till Date: INR ${paidFee.toLocaleString('en-IN')}`, 14, finalY + 5);
+  doc.text(`Remaining Balance: INR ${pendingFee.toLocaleString('en-IN')}`, 14, finalY + 10);
 
   // Terms & Signature
   doc.setFontSize(8);
@@ -146,16 +180,36 @@ export const generateFeeReceiptPDF = (student: Student, installment: FeeInstallm
   doc.text('Digitally Verified & Authorized', 165, 244, { align: 'center' });
   doc.text('Accounts Department', 165, 249, { align: 'center' });
 
-  // Save PDF
-  doc.save(`Fee_Receipt_${student.rollNo}_${installment.installmentNo}.pdf`);
+  return doc;
+};
+
+export const generateFeeReceiptPDF = (
+  student: Student,
+  installment: FeeInstallment,
+  customSchoolInfo?: Partial<SchoolInfoSettings>
+) => {
+  const doc = buildFeeReceiptDoc(student, installment, customSchoolInfo);
+  doc.save(`Fee_Receipt_${student.rollNo || 'STU'}_${installment.installmentNo || 1}.pdf`);
+};
+
+export const generateFeeReceiptPDFBuffer = (
+  student: Partial<Student>,
+  installment: Partial<FeeInstallment>,
+  customSchoolInfo?: Partial<SchoolInfoSettings>
+): Buffer => {
+  const doc = buildFeeReceiptDoc(student, installment, customSchoolInfo);
+  const arrayBuffer = doc.output('arraybuffer');
+  return Buffer.from(arrayBuffer);
 };
 
 export const generateReportCardPDF = (
   student: Student,
   exam: ExamTest,
   mark: StudentExamMark,
-  batchRankText: string = 'Rank #2 in Batch'
+  batchRankText: string = 'Rank #2 in Batch',
+  customSchoolInfo?: Partial<SchoolInfoSettings>
 ) => {
+  const school = getActiveSchoolInfo(customSchoolInfo);
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -168,14 +222,14 @@ export const generateReportCardPDF = (
 
   // Title
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(20);
+  doc.setFontSize(18);
   doc.setFont('helvetica', 'bold');
-  doc.text('APEX ACADEMY OF EXCELLENCE', 14, 18);
+  doc.text(school.institutionName.toUpperCase(), 14, 18);
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text('Academic Performance & Continuous Evaluation Report', 14, 25);
-  doc.text('Session: 2026-2027 | Confidential Student Assessment', 14, 31);
+  doc.text(school.tagline || 'Academic Performance & Continuous Evaluation Report', 14, 25);
+  doc.text(`Session: ${school.academicYear || '2026-2027'} | Helpline: ${school.phone} | ${school.email}`, 14, 31);
 
   // Badge / Rank in header
   doc.setFillColor(99, 102, 241);
@@ -322,8 +376,10 @@ export const generateStudentAttendancePDF = (
   student: Student,
   batchName: string,
   records: AttendancePDFRecord[],
-  stats: AttendancePDFStats
+  stats: AttendancePDFStats,
+  customSchoolInfo?: Partial<SchoolInfoSettings>
 ) => {
+  const school = getActiveSchoolInfo(customSchoolInfo);
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -336,14 +392,14 @@ export const generateStudentAttendancePDF = (
 
   // Academy Name & Header
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(20);
+  doc.setFontSize(18);
   doc.setFont('helvetica', 'bold');
-  doc.text('APEX ACADEMY OF EXCELLENCE', 14, 16);
+  doc.text(school.institutionName.toUpperCase(), 14, 16);
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text('Official Student Attendance Ledger & Presence Certificate', 14, 23);
-  doc.text('Helpline: +91 98765 00000 | attendance@apexacademy.edu | Session: 2026-2027', 14, 29);
+  doc.text(school.tagline || 'Official Student Attendance Ledger & Presence Certificate', 14, 23);
+  doc.text(`Helpline: ${school.phone} | ${school.email} | Session: ${school.academicYear || '2026-2027'}`, 14, 29);
 
   // Document Title
   doc.setTextColor(15, 23, 42);
@@ -470,4 +526,228 @@ export const generateStudentAttendancePDF = (
 
   doc.save(`Attendance_${student.rollNo}_${new Date().toISOString().split('T')[0]}.pdf`);
 };
+
+/**
+ * Builds an official, branded Institutional Faculty Payslip PDF
+ */
+export const buildPayslipDoc = (
+  record: PayrollRecord,
+  teacher: Partial<Teacher> | Teacher,
+  customSchoolInfo?: Partial<SchoolInfoSettings>
+): jsPDF => {
+  const school = getActiveSchoolInfo(customSchoolInfo);
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  // Header Banner
+  doc.setFillColor(30, 41, 59); // Slate 800
+  doc.rect(0, 0, 210, 36, 'F');
+
+  // Accent Line
+  doc.setFillColor(16, 185, 129); // Emerald 500
+  doc.rect(0, 36, 210, 2.5, 'F');
+
+  // Academy Name & Subtitle
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(18);
+  doc.setFont('helvetica', 'bold');
+  doc.text((school.institutionName || 'Apex Academy').toUpperCase(), 14, 16);
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(203, 213, 225);
+  doc.text(
+    `${school.address || 'Knowledge Park City'} | Contact: ${school.phone || '+91 98765 43210'} | ${school.email || 'admin@apexacademy.edu'}`,
+    14,
+    24
+  );
+  doc.text('OFFICIAL FACULTY SALARY & DISBURSEMENT SLIP', 14, 30);
+
+  // Payslip Period Badge on Right
+  doc.setFillColor(51, 65, 85);
+  doc.roundedRect(145, 8, 52, 20, 2, 2, 'F');
+  doc.setFontSize(7.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text('PAYROLL PERIOD', 171, 14, { align: 'center' });
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text(record.period, 171, 22, { align: 'center' });
+
+  // Faculty & Payout Details Section
+  let y = 48;
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(14, y, 182, 34, 2, 2, 'F');
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(14, y, 182, 34, 2, 2, 'D');
+
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.text('FACULTY DETAILS', 20, y + 7);
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+
+  doc.text(`Faculty Name: `, 20, y + 14);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(`${record.teacherName || teacher.name || 'Faculty Member'}`, 48, y + 14);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Faculty ID: `, 20, y + 20);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(`${record.facultyId || teacher.facultyId || teacher.id || 'N/A'}`, 48, y + 20);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Compensation: `, 20, y + 26);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(`${(record.structureSnapshot?.type || 'fixed').toUpperCase()} MODEL`, 48, y + 26);
+
+  // Column 2
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Disbursement Status: `, 115, y + 14);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(record.status === 'paid' ? 16 : 79, record.status === 'paid' ? 185 : 70, record.status === 'paid' ? 129 : 229);
+  doc.text(record.status.toUpperCase(), 155, y + 14);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Payment Mode / Ref: `, 115, y + 20);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(`${record.paymentMode || 'Direct'} / ${record.paymentRef || 'N/A'}`, 155, y + 20);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Paid Date: `, 115, y + 26);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(`${record.paidAt ? record.paidAt.slice(0, 10) : 'Pending Settlement'}`, 155, y + 26);
+
+  // Line Items Table (Earnings & Deductions)
+  y = 90;
+
+  const earnings = record.lineItems.filter((item) => item.type === 'earning');
+  const deductions = record.lineItems.filter((item) => item.type === 'deduction');
+  const maxRows = Math.max(earnings.length, deductions.length, 1);
+
+  const tableBody: any[][] = [];
+  for (let i = 0; i < maxRows; i++) {
+    const earn = earnings[i];
+    const ded = deductions[i];
+    tableBody.push([
+      earn ? earn.label : '',
+      earn ? formatPaiseToINR(earn.amount) : '',
+      ded ? ded.label : '',
+      ded ? formatPaiseToINR(ded.amount) : '',
+    ]);
+  }
+
+  addTable(doc, {
+    startY: y,
+    margin: { left: 14, right: 14 },
+    head: [['EARNINGS BREAKDOWN', 'AMOUNT (₹)', 'DEDUCTIONS & TAXES', 'AMOUNT (₹)']],
+    body: tableBody,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [30, 41, 59],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8,
+      halign: 'left',
+    },
+    styles: {
+      fontSize: 8,
+      cellPadding: 3.5,
+      textColor: [30, 41, 59],
+    },
+    columnStyles: {
+      0: { cellWidth: 60 },
+      1: { cellWidth: 31, halign: 'right', fontStyle: 'bold' },
+      2: { cellWidth: 60 },
+      3: { cellWidth: 31, halign: 'right', fontStyle: 'bold', textColor: [225, 29, 72] },
+    },
+  });
+
+  let currentY = (doc as any).lastAutoTable?.finalY || 150;
+
+  // Totals Summary Box
+  currentY += 4;
+  doc.setFillColor(241, 245, 249);
+  doc.rect(14, currentY, 182, 28, 'F');
+  doc.setDrawColor(203, 213, 225);
+  doc.rect(14, currentY, 182, 28, 'D');
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Total Gross Earnings:`, 20, currentY + 8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(formatPaiseToINR(record.gross), 75, currentY + 8);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Total Deductions:`, 20, currentY + 16);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(225, 29, 72);
+  doc.text(`-${formatPaiseToINR(record.totalDeductions)}`, 75, currentY + 16);
+
+  // Net Pay Highlight Badge
+  doc.setFillColor(16, 185, 129);
+  doc.roundedRect(120, currentY + 4, 70, 20, 2, 2, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'normal');
+  doc.text('NET DISBURSED AMOUNT', 155, currentY + 10, { align: 'center' });
+  doc.setFontSize(13);
+  doc.setFont('helvetica', 'bold');
+  doc.text(formatPaiseToINR(record.net), 155, currentY + 19, { align: 'center' });
+
+  // Signatures & Legal Disclaimer
+  currentY += 45;
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Authorized Finance Controller', 25, currentY);
+  doc.text('Faculty Signature & Acknowledgement', 125, currentY);
+
+  doc.setDrawColor(203, 213, 225);
+  doc.line(20, currentY - 5, 75, currentY - 5);
+  doc.line(120, currentY - 5, 185, currentY - 5);
+
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  doc.text(
+    'This is a system-generated official electronic payslip issued by Apex Academy. All financial records are stored securely.',
+    105,
+    280,
+    { align: 'center' }
+  );
+
+  return doc;
+};
+
+/**
+ * Downloads the Payslip as a PDF
+ */
+export const generatePayslipPdf = (
+  record: PayrollRecord,
+  teacher: Partial<Teacher> | Teacher,
+  customSchoolInfo?: Partial<SchoolInfoSettings>
+): void => {
+  const doc = buildPayslipDoc(record, teacher, customSchoolInfo);
+  const teacherTag = (record.teacherName || 'Faculty').replace(/\s+/g, '_');
+  doc.save(`Payslip_${teacherTag}_${record.period}.pdf`);
+};
+
 

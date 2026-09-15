@@ -16,10 +16,15 @@ export default function TeacherPage() {
     batches,
     students,
     homework,
+    submissions,
     addHomework,
+    deleteHomework,
+    gradeSubmission,
     attendance,
     exams,
     marks,
+    timetableSlots,
+    announcements,
     markBatchAttendance,
     createExam,
     saveExamMarks,
@@ -126,10 +131,15 @@ export default function TeacherPage() {
       batches={assignedBatches}
       students={scopedStudents}
       homework={scopedHomework}
+      submissions={submissions}
       attendance={scopedAttendance}
       exams={scopedExams}
       marks={scopedMarks}
+      timetableSlots={timetableSlots}
+      announcements={announcements}
       onAddHomework={addHomework}
+      onDeleteHomework={deleteHomework}
+      onGradeSubmission={gradeSubmission}
       onMarkAttendance={markBatchAttendance}
       onCreateExam={createExam}
       onSaveMarks={saveExamMarks}

@@ -61,7 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await fetch('/api/auth/session-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
+        body: JSON.stringify({ idToken, expectedRole: resolvedRole || undefined }),
       });
     } catch (err: any) {
       if (err?.code === 'auth/id-token-revoked') {

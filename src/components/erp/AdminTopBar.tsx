@@ -51,6 +51,10 @@ const TAB_TITLES: Record<AdminTab, { title: string; subtitle: string }> = {
     title: 'Fee Ledgers & Invoicing',
     subtitle: 'Track dues, UPI payment reconciliations, and WhatsApp fee reminders',
   },
+  payroll: {
+    title: 'Faculty Compensation & Payroll',
+    subtitle: 'Manage salary structures, generate monthly runs, and disburse faculty payouts',
+  },
   attendance: {
     title: 'Batch Attendance Registers',
     subtitle: 'Take instant 15-second batch roll calls and dispatch absence alerts',
@@ -59,13 +63,29 @@ const TAB_TITLES: Record<AdminTab, { title: string; subtitle: string }> = {
     title: 'Academics, Tests & Scorecards',
     subtitle: 'Schedule test series, input scores, and publish automated WhatsApp reports',
   },
+  timetable: {
+    title: 'Weekly Timetable & Room Allocation',
+    subtitle: 'Schedule lectures, prevent teacher/room conflicts, and assign classrooms',
+  },
   analytics: {
     title: 'Business & Performance Analytics',
     subtitle: 'Financial velocities, academic progression, and cohort distributions',
   },
+  reports: {
+    title: 'Reports & Data Exports Center',
+    subtitle: 'Generate and export aggregated attendance, marks, homework, and timetable data to CSV & PDF',
+  },
   whatsapp: {
     title: 'WhatsApp Automation Hub',
     subtitle: 'Automated broadcast triggers, delivery logs, and parent communication',
+  },
+  settings: {
+    title: 'Institute Configuration & Settings',
+    subtitle: 'Centralized master control for school branding, fee rules, message templates, and grading',
+  },
+  audit: {
+    title: 'System Security & Audit Trail',
+    subtitle: 'Immutable chronological record of administrative edits, payment reconciliations, and profile changes',
   },
 };
 
@@ -218,32 +238,6 @@ export const AdminTopBar: React.FC<AdminTopBarProps> = ({
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Student</span>
-          </button>
-
-          {/* Home / Public Landing Page Button */}
-          <a
-            href="/"
-            onClick={(e) => {
-              e.preventDefault();
-              window.location.href = '/';
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200/90 bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 hover:border-indigo-200 transition-all text-xs font-bold shrink-0 shadow-2xs cursor-pointer"
-            title="Return to Public Landing Page"
-          >
-            <HomeIcon className="w-3.5 h-3.5 text-indigo-600" />
-            <span className="hidden sm:inline">Home Landing Page</span>
-            <span className="sm:hidden">Home</span>
-          </a>
-
-          {/* Sign Out Button */}
-          <button
-            type="button"
-            onClick={() => signOutUser('/login/admin')}
-            className="flex items-center gap-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 rounded-xl text-xs font-bold transition-all active:scale-95 shadow-xs cursor-pointer"
-            title="Sign Out of Admin Portal"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Logout</span>
           </button>
         </div>
       </div>

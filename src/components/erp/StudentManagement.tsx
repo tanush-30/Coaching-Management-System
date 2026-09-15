@@ -13,16 +13,23 @@ import {
   MoreVertical, 
   GraduationCap, 
   Eye, 
+  Edit2,
   Trash2, 
   CheckCircle2, 
   AlertCircle,
   ExternalLink,
   DollarSign,
-  X
+  X,
+  Key,
+  RotateCcw,
+  Loader2,
+  Sparkles,
 } from 'lucide-react';
 import { Batch, FeeInstallment, Student } from '@/lib/types';
 import { AddStudentModal } from './AddStudentModal';
+import { EditStudentModal } from './EditStudentModal';
 import { RecordPaymentModal } from './RecordPaymentModal';
+import { ConfirmationModal } from '@/components/common/ConfirmationModal';
 import { generateFeeReceiptPDF } from '@/lib/pdf-service';
 import { UserAvatar } from '@/components/common/UserAvatar';
 
@@ -49,9 +56,54 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
   const [selectedBatchFilter, setSelectedBatchFilter] = useState('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   
+  // Edit & Confirmation Modals
+  const [studentToEdit, setStudentToEdit] = useState<Student | null>(null);
+  const [isPreEditConfirmOpen, setIsPreEditConfirmOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+  const handleRequestEdit = (student: Student) => {
+    setStudentToEdit(student);
+    setIsPreEditConfirmOpen(true);
+  };
+
+  const handleConfirmPreEdit = () => {
+    setIsPreEditConfirmOpen(false);
+    setIsEditModalOpen(true);
+  };
+
   // Modals
   const [selectedStudentForView, setSelectedStudentForView] = useState<Student | null>(null);
   const [selectedPaymentInst, setSelectedPaymentInst] = useState<{ installment: FeeInstallment; student: Student } | null>(null);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetStatus, setResetStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleResetParentPassword = async (student: Student) => {
+    if (!student.parentEmail || !student.parentPhone) {
+      alert('Parent email and phone number are required.');
+      return;
+    }
+    setIsResettingPassword(true);
+    setResetStatus(null);
+    try {
+      const res = await fetch('/api/admin/update-parent-phone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId: student.id,
+          parentEmail: student.parentEmail,
+          parentPhone: student.parentPhone,
+          action: 'reset_password',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Failed to reset parent password.');
+      setResetStatus({ type: 'success', message: `Password reset to phone number (${student.parentPhone}).` });
+    } catch (err: any) {
+      setResetStatus({ type: 'error', message: err.message || 'Failed to reset password.' });
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
 
   // Filter students
   const filteredStudents = students.filter(student => {
@@ -293,6 +345,13 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
                             <Eye className="w-4 h-4" />
                           </button>
                           <button
+                            onClick={() => handleRequestEdit(student)}
+                            className="p-2 rounded-lg text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
+                            title="Edit Student & Parent Details"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
                             onClick={() => {
                               if (confirm(`Are you sure you want to remove ${student.name}?`)) {
                                 onDeleteStudent(student.id);
@@ -348,21 +407,69 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
                   <p className="text-xs text-indigo-600 font-mono font-bold">{selectedStudentForView.rollNo} • {selectedStudentForView.gender}</p>
                 </div>
               </div>
-              <button onClick={() => setSelectedStudentForView(null)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const student = selectedStudentForView;
+                    setSelectedStudentForView(null);
+                    handleRequestEdit(student);
+                  }}
+                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-colors border border-indigo-200"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  <span>Edit Profile</span>
+                </button>
+                <button onClick={() => setSelectedStudentForView(null)} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="bg-slate-50 p-3 rounded-xl border">
-                <span className="text-[10px] uppercase font-bold text-slate-500 block">Parent Name</span>
-                <span className="font-bold text-slate-900 mt-0.5 block">{selectedStudentForView.parentName} ({selectedStudentForView.parentRelation})</span>
-                <span className="text-[11px] text-slate-600">{selectedStudentForView.parentPhone}</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-bold text-slate-500">Parent & Guardian Contact</span>
+                  <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-bold">Portal Access</span>
+                </div>
+                <div>
+                  <span className="font-bold text-slate-900 text-sm block">{selectedStudentForView.parentName} ({selectedStudentForView.parentRelation})</span>
+                  <span className="text-[11px] text-slate-600 block mt-0.5">📞 {selectedStudentForView.parentPhone}</span>
+                  <span className="text-[11px] text-indigo-600 font-medium block truncate">✉️ {selectedStudentForView.parentEmail || 'No email registered'}</span>
+                </div>
+
+                <div className="pt-2 border-t border-slate-200/80">
+                  <button
+                    type="button"
+                    disabled={isResettingPassword}
+                    onClick={() => handleResetParentPassword(selectedStudentForView)}
+                    className="w-full bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-bold px-2.5 py-1.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-all shadow-xs disabled:opacity-50"
+                  >
+                    {isResettingPassword ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                    ) : (
+                      <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />
+                    )}
+                    <span>Reset Parent Password to Phone</span>
+                  </button>
+
+                  {resetStatus && (
+                    <div className={`mt-2 p-2 rounded-lg text-[10px] font-medium flex items-center gap-1.5 ${
+                      resetStatus.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+                    }`}>
+                      {resetStatus.type === 'success' ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />}
+                      <span>{resetStatus.message}</span>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="bg-slate-50 p-3 rounded-xl border">
-                <span className="text-[10px] uppercase font-bold text-slate-500 block">School / College</span>
-                <span className="font-bold text-slate-900 mt-0.5 block">{selectedStudentForView.schoolName}</span>
-                <span className="text-[11px] text-slate-600">{selectedStudentForView.address}</span>
+
+              <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2">
+                <span className="text-[10px] uppercase font-bold text-slate-500 block">Academic & Address Details</span>
+                <div>
+                  <span className="font-bold text-slate-900 block">{selectedStudentForView.schoolName}</span>
+                  <span className="text-[11px] text-slate-600 block mt-1">{selectedStudentForView.address}</span>
+                  <span className="text-[11px] text-slate-500 block mt-1">Student Phone: {selectedStudentForView.phone}</span>
+                </div>
               </div>
             </div>
 
@@ -432,6 +539,37 @@ export const StudentManagement: React.FC<StudentManagementProps> = ({
           </div>
         </div>
       )}
+
+      {/* Stage 1 Confirmation Before Editing Student/Parent */}
+      <ConfirmationModal
+        isOpen={isPreEditConfirmOpen}
+        onClose={() => {
+          setIsPreEditConfirmOpen(false);
+          setStudentToEdit(null);
+        }}
+        onConfirm={handleConfirmPreEdit}
+        title="Confirm Student & Parent Edit"
+        message={
+          <div>
+            Are you sure you want to edit details of student <strong className="text-slate-900">{studentToEdit?.name}</strong> and their parent/guardian?
+          </div>
+        }
+        confirmText="Yes, Open Edit Form"
+        cancelText="Cancel"
+        variant="primary"
+      />
+
+      {/* Edit Student & Parent Modal */}
+      <EditStudentModal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setStudentToEdit(null);
+        }}
+        student={studentToEdit}
+        batches={batches}
+        onUpdateStudent={onUpdateStudent}
+      />
     </div>
   );
 };

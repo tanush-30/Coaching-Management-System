@@ -205,29 +205,67 @@ export async function batchWrite(operations: BatchOperation[]): Promise<void> {
 }
 
 /**
- * Checks if a custom Member ID / Enrollment ID is already taken in the system.
+ * Checks if a custom Member ID / Enrollment ID is already taken in the system across all Firestore collections.
  */
 export async function checkMemberIdAvailable(customId: string): Promise<{
   available: boolean;
-  existingMemberType?: 'student' | 'faculty';
+  existingMemberType?: 'student' | 'faculty' | 'batch';
   existingName?: string;
+  reason?: string;
 }> {
-  const normalizedId = customId.trim().toUpperCase();
+  const normalizedId = customId?.trim().toUpperCase();
   if (!normalizedId) return { available: true };
   if (!isFirebaseConfigured) return { available: true };
 
   try {
     const db = getClientDb();
+
+    // 1. Direct registry check in 'member_ids'
     const docRef = doc(db, 'member_ids', normalizedId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      const data = snap.data() as { memberType: 'student' | 'faculty'; name: string };
+      const data = snap.data() as { memberType: 'student' | 'faculty' | 'batch'; name: string };
+      const roleLabel = data.memberType === 'faculty' ? 'faculty member' : data.memberType === 'student' ? 'student' : 'batch';
       return {
         available: false,
         existingMemberType: data.memberType,
         existingName: data.name,
+        reason: `This ${data.memberType === 'faculty' ? 'Faculty ID' : data.memberType === 'student' ? 'Student ID' : 'Batch Code'} is already assigned to ${roleLabel} "${data.name || normalizedId}". Please enter a different ID.`,
       };
     }
+
+    // 2. Check 'teachers' collection for facultyId match or direct doc ID
+    try {
+      const teacherDirect = await getDoc(doc(db, 'teachers', normalizedId));
+      if (teacherDirect.exists()) {
+        const teacherData = teacherDirect.data() as any;
+        return {
+          available: false,
+          existingMemberType: 'faculty',
+          existingName: teacherData.name || 'Faculty Member',
+          reason: `This Faculty ID is already assigned to faculty member "${teacherData.name || normalizedId}". Please enter a different ID.`,
+        };
+      }
+    } catch {
+      // Continue to next check
+    }
+
+    // 3. Check 'students' collection for rollNo match or direct doc ID
+    try {
+      const studentDirect = await getDoc(doc(db, 'students', normalizedId));
+      if (studentDirect.exists()) {
+        const studentData = studentDirect.data() as any;
+        return {
+          available: false,
+          existingMemberType: 'student',
+          existingName: studentData.name || 'Student',
+          reason: `This Student ID is already assigned to student "${studentData.name || normalizedId}". Please enter a different ID.`,
+        };
+      }
+    } catch {
+      // Continue to next check
+    }
+
     return { available: true };
   } catch (err) {
     console.warn('[FirestoreService] checkMemberIdAvailable error:', err);

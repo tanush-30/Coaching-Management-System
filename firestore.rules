@@ -29,9 +29,21 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // 2. Audit Logs: Strictly Admin read/write only
+    // 2. Audit Logs: Append-Only Immutable Security Ledger
+    // - Admin can inspect logs in Admin Viewer
+    // - Client-side create, update, and delete are strictly forbidden (false)
+    // - Server-side Admin SDK handles append writes securely
     match /audit_logs/{logId} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
     }
 
     // 3. Member ID Reservations: Admin only
@@ -108,9 +120,58 @@ service cloud.firestore {
       allow write: if isAdmin() || isTeacher();
     }
 
+    match /studyMaterials/{matId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        (isTeacher() && (
+          resource.data.batchId == null ||
+          (request.auth.token.batchIds != null && resource.data.batchId in request.auth.token.batchIds)
+        )) ||
+        (isStudent() && (
+          resource.data.batchId == request.auth.token.batchId ||
+          (request.auth.token.batchIds != null && resource.data.batchId in request.auth.token.batchIds)
+        )) ||
+        isParent()
+      );
+      allow create: if isAdmin() || (
+        isTeacher() && (
+          request.auth.token.batchIds == null ||
+          request.resource.data.batchId in request.auth.token.batchIds
+        )
+      );
+      allow update, delete: if isAdmin() || (
+        isTeacher() && (
+          request.auth.token.batchIds == null ||
+          resource.data.batchId in request.auth.token.batchIds
+        )
+      );
+    }
+
     match /materials/{matId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin() || isTeacher();
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        (isTeacher() && (
+          resource.data.batchId == null ||
+          (request.auth.token.batchIds != null && resource.data.batchId in request.auth.token.batchIds)
+        )) ||
+        (isStudent() && (
+          resource.data.batchId == request.auth.token.batchId ||
+          (request.auth.token.batchIds != null && resource.data.batchId in request.auth.token.batchIds)
+        )) ||
+        isParent()
+      );
+      allow create: if isAdmin() || (
+        isTeacher() && (
+          request.auth.token.batchIds == null ||
+          request.resource.data.batchId in request.auth.token.batchIds
+        )
+      );
+      allow update, delete: if isAdmin() || (
+        isTeacher() && (
+          request.auth.token.batchIds == null ||
+          resource.data.batchId in request.auth.token.batchIds
+        )
+      );
     }
 
     // 12. Fees & Installments: Admin full access; Students & Parents read own records only
@@ -136,6 +197,62 @@ service cloud.firestore {
           request.auth.token.childIds != null && resource.data.studentId in request.auth.token.childIds
         ));
       allow write: if isAdmin();
+    }
+
+    // 13. Fee Receipts: Scoped by student ownership and parent linkage
+    match /receipts/{receiptId} {
+      allow read: if isAdmin() ||
+        (isStudent() && (
+          resource.data.studentId == request.auth.uid ||
+          resource.data.studentId == request.auth.token.studentId
+        )) ||
+        (isParent() && (
+          request.auth.token.childIds != null && resource.data.studentId in request.auth.token.childIds
+        ));
+      allow write: if isAdmin();
+    }
+
+    // 14. Payment Orders: Scoped by student ownership and parent linkage
+    match /payment_orders/{orderId} {
+      allow read: if isAdmin() ||
+        (isStudent() && (
+          resource.data.studentId == request.auth.uid ||
+          resource.data.studentId == request.auth.token.studentId
+        )) ||
+        (isParent() && (
+          request.auth.token.childIds != null && resource.data.studentId in request.auth.token.childIds
+        ));
+      allow write: if isAdmin();
+    }
+
+    // 15. Timetable Slots: Authenticated users can read schedules; Admin full write
+    match /timetableSlots/{slotId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 16. Faculty Payroll Records: Admin full access; Faculty reads own approved/paid records only
+    match /payroll/{docId} {
+      allow read: if isAdmin() || (
+        isAuthenticated() &&
+        resource.data.teacherId == request.auth.uid &&
+        resource.data.status in ['approved', 'paid']
+      );
+      allow write: if isAdmin();
+    }
+
+    // 17. Salary Structures: Admin full access; Faculty reads own structure
+    match /salaryStructures/{structureId} {
+      allow read: if isAdmin() || (
+        isAuthenticated() &&
+        resource.data.teacherId == request.auth.uid
+      );
+      allow write: if isAdmin();
+    }
+
+    // 18. Payroll Audit Logs: Admin read/write only
+    match /payrollAudit/{auditId} {
+      allow read, write: if isAdmin();
     }
 
     // Default deny-all fallback for any unspecified collections

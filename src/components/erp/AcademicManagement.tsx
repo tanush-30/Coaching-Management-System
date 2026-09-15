@@ -26,8 +26,9 @@ interface AcademicManagementProps {
   marks: StudentExamMark[];
   batches: Batch[];
   students: Student[];
+  userRole?: 'admin' | 'teacher';
   onCreateExam: (examData: any) => void;
-  onSaveMarks: (examId: string, marksList: any[]) => any;
+  onSaveMarks: (examId: string, marksList: any[], status?: 'draft' | 'final', reason?: string) => any;
 }
 
 export const AcademicManagement: React.FC<AcademicManagementProps> = ({
@@ -35,6 +36,7 @@ export const AcademicManagement: React.FC<AcademicManagementProps> = ({
   marks,
   batches,
   students,
+  userRole = 'admin',
   onCreateExam,
   onSaveMarks,
 }) => {
@@ -48,8 +50,22 @@ export const AcademicManagement: React.FC<AcademicManagementProps> = ({
     (e) => selectedBatchFilter === 'all' || e.batchId === selectedBatchFilter
   );
 
-  const selectedExam = exams.find((e) => e.id === selectedExamId) || exams[0];
-  const currentExamMarks = marks.filter((m) => m.examId === selectedExamId).sort((a, b) => a.rank - b.rank);
+  const selectedExam = exams.find((e) => e.id === selectedExamId) || filteredExams[0] || exams[0] || null;
+  const currentExamMarks = selectedExam
+    ? marks.filter((m) => m.examId === selectedExam.id).sort((a, b) => a.rank - b.rank)
+    : [];
+
+  const evaluatedExamsCount = exams.filter((e) => e.status === 'evaluated').length;
+  const avgScorePercentage = marks.length > 0
+    ? (
+        marks.reduce((acc, curr) => {
+          const pct = curr.percentage ?? ((curr.marksObtained / (curr.totalMarks || 100)) * 100);
+          return acc + pct;
+        }, 0) / marks.length
+      ).toFixed(1) + '%'
+    : '0.0%';
+
+  const whatsappDispatchesCount = marks.filter((m) => m.whatsappSent).length;
 
   return (
     <div className="space-y-6">
@@ -82,12 +98,12 @@ export const AcademicManagement: React.FC<AcademicManagementProps> = ({
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
           <span className="text-[11px] font-bold text-slate-500 uppercase">Total Tests Scheduled</span>
           <div className="text-2xl font-extrabold text-slate-900 mt-1">{exams.length} Exams</div>
-          <span className="text-[10px] text-indigo-600 font-medium">{exams.filter((e) => e.status === 'evaluated').length} Evaluated</span>
+          <span className="text-[10px] text-indigo-600 font-medium">{evaluatedExamsCount} Evaluated</span>
         </div>
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
           <span className="text-[11px] font-bold text-slate-500 uppercase">Average Academy Score</span>
-          <div className="text-2xl font-extrabold text-emerald-600 mt-1">84.2%</div>
-          <span className="text-[10px] text-emerald-600 font-medium">Consistent Top Percentile</span>
+          <div className="text-2xl font-extrabold text-emerald-600 mt-1">{avgScorePercentage}</div>
+          <span className="text-[10px] text-emerald-600 font-medium">{marks.length > 0 ? 'Live Evaluation Average' : 'Awaiting Test Evaluations'}</span>
         </div>
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
           <span className="text-[11px] font-bold text-slate-500 uppercase">PDF Report Cards</span>
@@ -96,7 +112,7 @@ export const AcademicManagement: React.FC<AcademicManagementProps> = ({
         </div>
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
           <span className="text-[11px] font-bold text-slate-500 uppercase">WhatsApp Dispatches</span>
-          <div className="text-2xl font-extrabold text-emerald-600 mt-1">{marks.length} Delivered</div>
+          <div className="text-2xl font-extrabold text-emerald-600 mt-1">{whatsappDispatchesCount} Delivered</div>
           <span className="text-[10px] text-emerald-600 font-medium">Instant Parent Delivery</span>
         </div>
       </div>
@@ -122,58 +138,71 @@ export const AcademicManagement: React.FC<AcademicManagementProps> = ({
           </div>
 
           <div className="space-y-3">
-            {filteredExams.map((exam) => {
-              const isSelected = selectedExam?.id === exam.id;
-              const isEvaluated = exam.status === 'evaluated';
+            {filteredExams.length === 0 ? (
+              <div className="p-8 text-center text-slate-400 text-xs bg-white rounded-2xl border border-dashed border-slate-200 space-y-2">
+                <BookOpen className="w-8 h-8 mx-auto text-slate-300" />
+                <p className="font-semibold text-slate-600">No Tests Scheduled</p>
+                <p className="text-[11px] text-slate-400">Click "+ Schedule New Test" above to create an exam for your batch.</p>
+              </div>
+            ) : (
+              filteredExams.map((exam) => {
+                const isSelected = selectedExam?.id === exam.id;
+                const isFinal = exam.marksStatus === 'final' || exam.status === 'evaluated';
+                const isDraft = exam.marksStatus === 'draft' || exam.status === 'draft';
 
-              return (
-                <div
-                  key={exam.id}
-                  onClick={() => setSelectedExamId(exam.id)}
-                  className={`p-4 rounded-2xl border cursor-pointer transition-all space-y-2.5 ${
-                    isSelected
-                      ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/40 shadow-sm'
-                      : 'border-slate-200 bg-white hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
-                      {exam.batchName}
-                    </span>
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        isEvaluated ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                      }`}
-                    >
-                      {isEvaluated ? 'Evaluated ✓' : 'Scheduled'}
-                    </span>
-                  </div>
-
-                  <h4 className="font-bold text-slate-900 text-sm">{exam.title}</h4>
-                  <div className="text-[11px] text-slate-500">
-                    Subject: {exam.subject} • Max Marks: {exam.totalMarks}
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[10px] text-slate-500">
-                    <span>Date: {exam.examDate}</span>
-                    {isEvaluated ? (
-                      <span className="text-indigo-600 font-bold">Top: {exam.highestScore}/{exam.totalMarks}</span>
-                    ) : (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedExamForGrading(exam);
-                          setIsMarksModalOpen(true);
-                        }}
-                        className="text-indigo-600 font-bold hover:underline"
+                return (
+                  <div
+                    key={exam.id}
+                    onClick={() => setSelectedExamId(exam.id)}
+                    className={`p-4 rounded-2xl border cursor-pointer transition-all space-y-2.5 ${
+                      isSelected
+                        ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/40 shadow-sm'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                        {exam.batchName}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          isFinal
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : isDraft
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-slate-100 text-slate-700'
+                        }`}
                       >
-                        Enter Marks →
-                      </button>
-                    )}
+                        {isFinal ? 'Final ✓' : isDraft ? 'Draft (Editable)' : 'Scheduled'}
+                      </span>
+                    </div>
+
+                    <h4 className="font-bold text-slate-900 text-sm">{exam.title}</h4>
+                    <div className="text-[11px] text-slate-500">
+                      Subject: {exam.subject} • Max Marks: {exam.totalMarks}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[10px] text-slate-500">
+                      <span>Date: {exam.examDate}</span>
+                      {isFinal ? (
+                        <span className="text-indigo-600 font-bold">Top: {exam.highestScore}/{exam.totalMarks}</span>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedExamForGrading(exam);
+                            setIsMarksModalOpen(true);
+                          }}
+                          className="text-indigo-600 font-bold hover:underline"
+                        >
+                          {isDraft ? 'Edit Draft →' : 'Enter Marks →'}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -184,9 +213,20 @@ export const AcademicManagement: React.FC<AcademicManagementProps> = ({
               {/* Test Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4">
                 <div>
-                  <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">
-                    {selectedExam.batchName} • {selectedExam.subject}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">
+                      {selectedExam.batchName} • {selectedExam.subject}
+                    </span>
+                    {(selectedExam.marksStatus === 'final' || selectedExam.status === 'evaluated') ? (
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-extrabold px-2 py-0.5 rounded-full border border-emerald-300">
+                        Final Scorecards Locked
+                      </span>
+                    ) : (selectedExam.marksStatus === 'draft' || selectedExam.status === 'draft') ? (
+                      <span className="text-[10px] bg-amber-100 text-amber-800 font-extrabold px-2 py-0.5 rounded-full border border-amber-300">
+                        Draft In-Progress
+                      </span>
+                    ) : null}
+                  </div>
                   <h3 className="text-xl font-bold text-slate-900 mt-1">{selectedExam.title}</h3>
                   <p className="text-xs text-slate-500 mt-0.5">
                     Conducted on {selectedExam.examDate} • Maximum Marks: {selectedExam.totalMarks} (Passing: {selectedExam.passingMarks})
@@ -199,16 +239,30 @@ export const AcademicManagement: React.FC<AcademicManagementProps> = ({
                       setSelectedExamForGrading(selectedExam);
                       setIsMarksModalOpen(true);
                     }}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-95"
+                    className={`font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer ${
+                      (selectedExam.marksStatus === 'final' || selectedExam.status === 'evaluated')
+                        ? userRole === 'admin'
+                          ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                          : 'bg-slate-800 hover:bg-slate-900 text-white'
+                        : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                    }`}
                   >
                     <Award className="w-4 h-4" />
-                    <span>{selectedExam.status === 'evaluated' ? 'Edit Marks' : 'Enter Marks'}</span>
+                    <span>
+                      {(selectedExam.marksStatus === 'final' || selectedExam.status === 'evaluated')
+                        ? userRole === 'admin'
+                          ? 'Admin Edit Marks'
+                          : 'View Final Marks'
+                        : (selectedExam.marksStatus === 'draft' || selectedExam.status === 'draft')
+                        ? 'Edit Draft Marks'
+                        : 'Enter Marks'}
+                    </span>
                   </button>
                 </div>
               </div>
 
               {/* Performance Summary Pill Grid */}
-              {selectedExam.status === 'evaluated' && (
+              {(selectedExam.status === 'evaluated' || selectedExam.marksStatus === 'final') && (
                 <div className="grid grid-cols-3 gap-3 text-xs">
                   <div className="bg-indigo-50/60 p-3 rounded-2xl border border-indigo-100 text-center">
                     <span className="text-[10px] uppercase font-bold text-slate-500 block">Batch Average</span>
@@ -346,6 +400,7 @@ export const AcademicManagement: React.FC<AcademicManagementProps> = ({
         exam={selectedExamForGrading}
         students={students}
         existingMarks={marks}
+        userRole={userRole}
         onSaveMarks={onSaveMarks}
       />
     </div>

@@ -5,6 +5,7 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 import { getAuth, type Auth } from 'firebase/auth';
+import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -23,6 +24,7 @@ export const isFirebaseConfigured = Boolean(
 let _app: FirebaseApp | undefined;
 let _db: Firestore | undefined;
 let _auth: Auth | undefined;
+let _storage: FirebaseStorage | undefined;
 
 function getFirebaseApp(): FirebaseApp {
   if (typeof window === 'undefined') {
@@ -45,6 +47,7 @@ if (typeof window !== 'undefined' && isFirebaseConfigured) {
     _app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
     _db = getFirestore(_app);
     _auth = getAuth(_app);
+    _storage = getStorage(_app);
   } catch (e) {
     console.warn('[Firebase] Client initialization warning:', e);
   }
@@ -52,6 +55,7 @@ if (typeof window !== 'undefined' && isFirebaseConfigured) {
 
 export const db: Firestore = (_db || ({} as Firestore));
 export const auth: Auth = (_auth || ({} as Auth));
+export const storage: FirebaseStorage = (_storage || ({} as FirebaseStorage));
 
 export function getClientDb(): Firestore {
   if (!_db) {
@@ -69,5 +73,18 @@ export function getClientAuth(): Auth {
   return _auth;
 }
 
-export default { get app() { return getFirebaseApp(); }, get db() { return getClientDb(); }, get auth() { return getClientAuth(); } };
+export function getClientStorage(): FirebaseStorage {
+  if (!_storage) {
+    const app = getFirebaseApp();
+    _storage = getStorage(app);
+  }
+  return _storage;
+}
+
+export default {
+  get app() { return getFirebaseApp(); },
+  get db() { return getClientDb(); },
+  get auth() { return getClientAuth(); },
+  get storage() { return getClientStorage(); },
+};
 

@@ -16,10 +16,15 @@ export default function StudentPage() {
     students,
     batches,
     homework,
+    submissions,
     materials,
     exams,
     marks,
     attendance,
+    installments,
+    timetableSlots,
+    announcements,
+    submitHomework,
   } = useERPStore();
 
   const [apiStudent, setApiStudent] = useState<Student | null>(null);
@@ -143,18 +148,31 @@ export default function StudentPage() {
   // Strictly scoped data: only this student's batches, homework, materials, and test marks
   const studentBatchIds = currentStudent ? currentStudent.batchIds || [] : [];
   const scopedHomework = homework.filter((h) => studentBatchIds.includes(h.batchId));
-  const scopedMaterials = materials.filter((m) => studentBatchIds.includes(m.batchId));
-  const scopedMarks = currentStudent ? marks.filter((m) => m.studentId === currentStudent.id) : [];
+  const scopedMaterials = materials.filter((m: any) => studentBatchIds.includes(m.batchId));
+  const scopedMarks = currentStudent
+    ? marks.filter((m) => {
+        const matchesId = m.studentId === currentStudent.id;
+        const matchesRoll = currentStudent.rollNo && (m.rollNo === currentStudent.rollNo || m.studentId === currentStudent.rollNo);
+        const matchesAuthUid = (m as any).authUid && (m as any).authUid === currentStudent.id;
+        const isPublished = m.status === 'final' || (m as any).status === 'evaluated' || !m.status;
+        return (matchesId || matchesRoll || matchesAuthUid) && isPublished;
+      })
+    : [];
 
   return (
     <StudentPortal
       students={currentStudent ? [currentStudent] : students}
       batches={batches}
       homework={scopedHomework}
+      submissions={submissions}
       materials={scopedMaterials}
       exams={exams}
       marks={scopedMarks}
       attendance={attendance}
+      installments={installments}
+      timetableSlots={timetableSlots}
+      announcements={announcements}
+      onSubmitHomework={submitHomework}
     />
   );
 }

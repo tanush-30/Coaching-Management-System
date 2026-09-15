@@ -38,9 +38,48 @@ async function verifySession(request?: NextRequest) {
         const userDoc = await adminDb.collection('user_roles').doc(decoded.uid).get();
         if (userDoc.exists) {
           role = (userDoc.data()?.role as UserRole) || null;
+        } else if (decoded.email) {
+          const emailSnap = await adminDb
+            .collection('user_roles')
+            .where('email', '==', decoded.email.toLowerCase())
+            .limit(1)
+            .get();
+          if (!emailSnap.empty) {
+            role = (emailSnap.docs[0].data()?.role as UserRole) || null;
+          }
         }
       } catch (err) {
         console.warn('[VerifyRoute] user_roles lookup error:', err);
+      }
+    }
+
+    // Secondary Fallback: Infer role from email prefix (strict — unknown emails are rejected, NOT promoted to admin)
+    if (!role) {
+      const email = (decoded.email || '').toLowerCase();
+      if (email.startsWith('stu-') || email.includes('@studenterp.internal')) {
+        role = 'student';
+      } else if (email.startsWith('fac-') || email.startsWith('tea-')) {
+        role = 'teacher';
+      } else if (email.startsWith('par-')) {
+        role = 'parent';
+      } else if (email.includes('admin')) {
+        // Only promote to admin if the email literally contains 'admin'
+        role = 'admin';
+      }
+      // All other emails: role stays null → session is rejected with 401
+
+      // Auto-heal: if a recognisable role was inferred, persist the claim so this fallback is skipped next time
+      if (role) {
+        try {
+          await adminAuth.setCustomUserClaims(decoded.uid, { role });
+          await adminDb.collection('user_roles').doc(decoded.uid).set({
+            role,
+            email: decoded.email || '',
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+        } catch (e) {
+          console.warn('[VerifyRoute] Auto-heal sync error:', e);
+        }
       }
     }
 

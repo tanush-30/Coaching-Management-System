@@ -109,7 +109,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
     const percentage =
       totalConducted > 0
         ? Math.round(((presentCount + lateCount * 0.5) / totalConducted) * 100)
-        : 100;
+        : 0;
 
     return {
       totalConducted,
@@ -226,14 +226,26 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
           <span className="text-[10px] font-bold uppercase tracking-wider text-violet-200 block">
             Presence Rate
           </span>
-          <div className="text-3xl font-extrabold mt-1">{stats.percentage}%</div>
+          <div className="text-3xl font-extrabold mt-1">
+            {stats.totalConducted > 0 ? `${stats.percentage}%` : 'N/A'}
+          </div>
           <div className="mt-2 text-[10px] font-medium text-violet-100 flex items-center gap-1">
             <span
               className={`w-2 h-2 rounded-full ${
-                stats.percentage >= 75 ? 'bg-emerald-400' : 'bg-rose-400'
+                stats.totalConducted === 0
+                  ? 'bg-slate-300'
+                  : stats.percentage >= 75
+                  ? 'bg-emerald-400'
+                  : 'bg-rose-400'
               }`}
             />
-            <span>{stats.percentage >= 75 ? 'Meets 75% Rule' : 'Below Target'}</span>
+            <span>
+              {stats.totalConducted === 0
+                ? 'No Sessions Recorded'
+                : stats.percentage >= 75
+                ? 'Meets 75% Rule'
+                : 'Below Target'}
+            </span>
           </div>
         </div>
 

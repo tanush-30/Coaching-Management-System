@@ -8,13 +8,20 @@ import { StudentManagement } from '@/components/erp/StudentManagement';
 import { TeacherManagement } from '@/components/erp/TeacherManagement';
 import { BatchManagement } from '@/components/erp/BatchManagement';
 import { FeeManagement } from '@/components/erp/FeeManagement';
+import { PayrollManagement } from '@/components/erp/PayrollManagement';
 import { AttendanceManagement } from '@/components/erp/AttendanceManagement';
 import { WhatsAppAutomationHub } from '@/components/erp/WhatsAppAutomationHub';
 import { AcademicManagement } from '@/components/erp/AcademicManagement';
+import { TimetableManagement } from '@/components/erp/TimetableManagement';
 import { AdminAnalytics } from '@/components/erp/AdminAnalytics';
+import { ReportsManagement } from '@/components/erp/ReportsManagement';
+import { AuditLogsManagement } from '@/components/erp/AuditLogsManagement';
+import { SettingsManagement } from '@/components/erp/SettingsManagement';
 import { AddStudentModal } from '@/components/erp/AddStudentModal';
 import { AddTeacherModal } from '@/components/erp/AddTeacherModal';
 import { AddBatchModal } from '@/components/erp/AddBatchModal';
+import { AnnouncementComposerModal } from '@/components/erp/AnnouncementComposerModal';
+import { ChangePasswordModal } from '@/components/portal/ChangePasswordModal';
 import { useERPStore } from '@/lib/store';
 import { useAuth } from '@/lib/auth-context';
 import { useRouter } from 'next/navigation';
@@ -27,6 +34,8 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
 
   // Auto-redirect unauthenticated users to the admin login page
   React.useEffect(() => {
@@ -47,7 +56,11 @@ export default function AdminPage() {
     attendance,
     exams,
     marks,
+    homework,
+    submissions,
     whatsappLogs,
+    timetableSlots,
+    announcements,
     addStudent,
     updateStudent,
     deleteStudent,
@@ -61,8 +74,13 @@ export default function AdminPage() {
     createExam,
     saveExamMarks,
     sendBroadcastMessage,
+    addAnnouncement,
+    deleteAnnouncement,
     recordPayment,
     sendFeeReminder,
+    addTimetableSlot,
+    updateTimetableSlot,
+    deleteTimetableSlot,
   } = useERPStore();
 
   if (authLoading) {
@@ -88,10 +106,12 @@ export default function AdminPage() {
         teacherCount={teachers.length}
         batchCount={batches.length}
         examCount={exams.length}
+        slotCount={timetableSlots.length}
         whatsappCount={whatsappLogs.length}
         onOpenEnrollStudent={() => setIsEnrollModalOpen(true)}
         onOpenEnrollTeacher={() => setIsTeacherModalOpen(true)}
         onOpenCreateBatch={() => setIsBatchModalOpen(true)}
+        onChangePassword={() => setIsChangePasswordOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -123,6 +143,7 @@ export default function AdminPage() {
               onOpenEnrollModal={() => setIsEnrollModalOpen(true)}
               onOpenTeacherModal={() => setIsTeacherModalOpen(true)}
               onOpenBatchModal={() => setIsBatchModalOpen(true)}
+              onOpenAnnouncementModal={() => setIsAnnouncementModalOpen(true)}
             />
           )}
 
@@ -168,12 +189,19 @@ export default function AdminPage() {
             />
           )}
 
+          {activeTab === 'payroll' && (
+            <PayrollManagement
+              teachers={teachers}
+            />
+          )}
+
           {activeTab === 'attendance' && (
             <AttendanceManagement
               batches={batches}
               students={students}
               teachers={teachers}
               attendanceHistory={attendance}
+              userRole="admin"
               onMarkAttendance={markBatchAttendance}
             />
           )}
@@ -184,8 +212,21 @@ export default function AdminPage() {
               marks={marks}
               batches={batches}
               students={students}
+              userRole="admin"
               onCreateExam={createExam}
               onSaveMarks={saveExamMarks}
+            />
+          )}
+
+          {activeTab === 'timetable' && (
+            <TimetableManagement
+              batches={batches}
+              teachers={teachers}
+              timetableSlots={timetableSlots}
+              onAddSlot={addTimetableSlot}
+              onUpdateSlot={updateTimetableSlot}
+              onDeleteSlot={deleteTimetableSlot}
+              onSendBroadcast={sendBroadcastMessage}
             />
           )}
 
@@ -199,13 +240,32 @@ export default function AdminPage() {
             />
           )}
 
+          {activeTab === 'reports' && (
+            <ReportsManagement
+              students={students}
+              batches={batches}
+              teachers={teachers}
+              attendance={attendance}
+              exams={exams}
+              marks={marks}
+              homework={homework || []}
+              homeworkSubmissions={submissions || []}
+              timetableSlots={timetableSlots}
+            />
+          )}
+
           {activeTab === 'whatsapp' && (
             <WhatsAppAutomationHub
               whatsappLogs={whatsappLogs}
               batches={batches}
               onSendBroadcast={sendBroadcastMessage}
+              onOpenAnnouncementComposer={() => setIsAnnouncementModalOpen(true)}
             />
           )}
+
+          {activeTab === 'settings' && <SettingsManagement />}
+
+          {activeTab === 'audit' && <AuditLogsManagement />}
         </main>
       </div>
 
@@ -214,6 +274,7 @@ export default function AdminPage() {
         isOpen={isEnrollModalOpen}
         onClose={() => setIsEnrollModalOpen(false)}
         batches={batches}
+        students={students}
         onAddStudent={addStudent}
       />
 
@@ -221,6 +282,7 @@ export default function AdminPage() {
         isOpen={isTeacherModalOpen}
         onClose={() => setIsTeacherModalOpen(false)}
         batches={batches}
+        teachers={teachers}
         onAddTeacher={addTeacher}
       />
 
@@ -228,7 +290,23 @@ export default function AdminPage() {
         isOpen={isBatchModalOpen}
         onClose={() => setIsBatchModalOpen(false)}
         teachers={teachers}
+        batches={batches}
         onAddBatch={addBatch}
+      />
+
+      <AnnouncementComposerModal
+        isOpen={isAnnouncementModalOpen}
+        onClose={() => setIsAnnouncementModalOpen(false)}
+        batches={batches}
+        students={students}
+        teachers={teachers}
+        onSaveAnnouncement={addAnnouncement}
+      />
+
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+        userRoleTitle="Administrator"
       />
     </div>
   );

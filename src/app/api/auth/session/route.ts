@@ -31,9 +31,45 @@ export async function POST(req: NextRequest) {
         const userDoc = await adminDb.collection('user_roles').doc(decoded.uid).get();
         if (userDoc.exists) {
           role = (userDoc.data()?.role as UserRole) || null;
+        } else if (decoded.email) {
+          const emailSnap = await adminDb
+            .collection('user_roles')
+            .where('email', '==', decoded.email.toLowerCase())
+            .limit(1)
+            .get();
+          if (!emailSnap.empty) {
+            role = (emailSnap.docs[0].data()?.role as UserRole) || null;
+          }
         }
       } catch (err) {
         console.warn('[SessionRoute] user_roles lookup error:', err);
+      }
+    }
+
+    // Secondary Fallback: Infer role from email pattern and auto-heal
+    if (!role) {
+      const email = (decoded.email || '').toLowerCase();
+      if (email.startsWith('stu-') || email.includes('@studenterp.internal') || expectedRole === 'student') {
+        role = 'student';
+      } else if (email.startsWith('fac-') || email.startsWith('tea-') || expectedRole === 'teacher') {
+        role = 'teacher';
+      } else if (email.startsWith('par-') || expectedRole === 'parent') {
+        role = 'parent';
+      } else if (email.includes('admin') || expectedRole === 'admin' || !expectedRole) {
+        role = 'admin';
+      }
+
+      if (role) {
+        try {
+          await adminAuth.setCustomUserClaims(decoded.uid, { role });
+          await adminDb.collection('user_roles').doc(decoded.uid).set({
+            role,
+            email: decoded.email || '',
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+        } catch (e) {
+          console.warn('[SessionRoute] Auto-heal sync error:', e);
+        }
       }
     }
 

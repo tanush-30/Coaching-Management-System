@@ -573,12 +573,60 @@ export function useAddHomework() {
 
 // ── STUDY MATERIALS ───────────────────────────────────────────────────────────
 
-export function useStudyMaterials() {
+export function useStudyMaterials(batchId?: string, subject?: string) {
   return useQuery<StudyMaterial[]>({
-    queryKey: ['materials'],
+    queryKey: ['studyMaterials', batchId, subject],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'materials'));
-      return snap.docs.map(d => ({ id: d.id, ...d.data() }) as StudyMaterial);
+      const { getStudyMaterials } = await import('@/lib/study-materials-service');
+      return getStudyMaterials(batchId, subject);
+    },
+  });
+}
+
+export function useCreateStudyMaterial() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: import('@/lib/study-materials-service').CreateStudyMaterialInput) => {
+      const { createStudyMaterialRecord } = await import('@/lib/study-materials-service');
+      return createStudyMaterialRecord(data);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['studyMaterials'] });
+      qc.invalidateQueries({ queryKey: ['materials'] });
+    },
+  });
+}
+
+export function useUpdateStudyMaterial() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      updates,
+    }: {
+      id: string;
+      updates: import('@/lib/study-materials-service').UpdateStudyMaterialInput;
+    }) => {
+      const { updateStudyMaterialRecord } = await import('@/lib/study-materials-service');
+      return updateStudyMaterialRecord(id, updates);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['studyMaterials'] });
+      qc.invalidateQueries({ queryKey: ['materials'] });
+    },
+  });
+}
+
+export function useDeleteStudyMaterial() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { deleteStudyMaterialRecord } = await import('@/lib/study-materials-service');
+      return deleteStudyMaterialRecord(id);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['studyMaterials'] });
+      qc.invalidateQueries({ queryKey: ['materials'] });
     },
   });
 }

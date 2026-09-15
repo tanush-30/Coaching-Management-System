@@ -19,6 +19,9 @@ export default function ParentPage() {
     exams,
     marks,
     homework,
+    submissions,
+    timetableSlots,
+    announcements,
     recordPayment,
   } = useERPStore();
 
@@ -110,6 +113,9 @@ export default function ParentPage() {
         exams={exams}
         marks={scopedMarks}
         homework={scopedHomework}
+        submissions={submissions}
+        timetableSlots={timetableSlots}
+        announcements={announcements}
         onRecordPayment={recordPayment}
       />
     </div>

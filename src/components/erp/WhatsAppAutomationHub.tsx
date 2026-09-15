@@ -23,12 +23,14 @@ interface WhatsAppAutomationHubProps {
   whatsappLogs: WhatsAppMessage[];
   batches: Batch[];
   onSendBroadcast: (batchId: string, subjectTitle: string, messageBody: string) => Promise<number> | number;
+  onOpenAnnouncementComposer?: () => void;
 }
 
 export const WhatsAppAutomationHub: React.FC<WhatsAppAutomationHubProps> = ({
   whatsappLogs,
   batches,
   onSendBroadcast,
+  onOpenAnnouncementComposer,
 }) => {
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'absence_alert' | 'fee_reminder' | 'payment_receipt' | 'broadcast'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -85,11 +87,17 @@ export const WhatsAppAutomationHub: React.FC<WhatsAppAutomationHubProps> = ({
         </div>
 
         <button
-          onClick={() => setIsBroadcastOpen(true)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-md shadow-emerald-600/30 transition-all hover:scale-[1.02] active:scale-95"
+          onClick={() => {
+            if (onOpenAnnouncementComposer) {
+              onOpenAnnouncementComposer();
+            } else {
+              setIsBroadcastOpen(true);
+            }
+          }}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-md shadow-emerald-600/30 transition-all hover:scale-[1.02] active:scale-95 cursor-pointer"
         >
-          <Radio className="w-4 h-4" />
-          <span>+ Compose Batch Broadcast</span>
+          <Radio className="w-4 h-4 animate-pulse" />
+          <span>+ Compose Announcement / Broadcast</span>
         </button>
       </div>
 

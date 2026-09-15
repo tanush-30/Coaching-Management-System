@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import { Batch, Teacher } from '@/lib/types';
 import { AddTeacherModal } from './AddTeacherModal';
+import { EditTeacherModal } from './EditTeacherModal';
+import { ConfirmationModal } from '@/components/common/ConfirmationModal';
 import { UserAvatar } from '@/components/common/UserAvatar';
 
 interface TeacherManagementProps {
@@ -50,8 +52,20 @@ export const TeacherManagement: React.FC<TeacherManagementProps> = ({
   
   // Modals state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
+  const [teacherToEdit, setTeacherToEdit] = useState<Teacher | null>(null);
+  const [isPreEditConfirmOpen, setIsPreEditConfirmOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [assigningBatchTeacher, setAssigningBatchTeacher] = useState<Teacher | null>(null);
+
+  const handleRequestEdit = (teacher: Teacher) => {
+    setTeacherToEdit(teacher);
+    setIsPreEditConfirmOpen(true);
+  };
+
+  const handleConfirmPreEdit = () => {
+    setIsPreEditConfirmOpen(false);
+    setIsEditModalOpen(true);
+  };
 
   // Extract distinct subjects across all faculty
   const allSubjects = Array.from(
@@ -89,20 +103,6 @@ export const TeacherManagement: React.FC<TeacherManagementProps> = ({
 
     onUpdateTeacher(assigningBatchTeacher.id, { assignedBatches: updatedBatches });
     setAssigningBatchTeacher({ ...assigningBatchTeacher, assignedBatches: updatedBatches });
-  };
-
-  const handleSaveEdit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingTeacher) return;
-    onUpdateTeacher(editingTeacher.id, {
-      name: editingTeacher.name,
-      email: editingTeacher.email,
-      phone: editingTeacher.phone,
-      qualifications: editingTeacher.qualifications,
-      subjects: editingTeacher.subjects,
-      status: editingTeacher.status,
-    });
-    setEditingTeacher(null);
   };
 
   return (
@@ -302,9 +302,9 @@ export const TeacherManagement: React.FC<TeacherManagementProps> = ({
                   {/* Actions Dropdown / Trigger */}
                   <div className="flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity">
                     <button
-                      onClick={() => setEditingTeacher(teacher)}
+                      onClick={() => handleRequestEdit(teacher)}
                       className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                      title="Edit Teacher"
+                      title="Edit Faculty Details"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
@@ -491,9 +491,9 @@ export const TeacherManagement: React.FC<TeacherManagementProps> = ({
                             Batches
                           </button>
                           <button
-                            onClick={() => setEditingTeacher(teacher)}
+                            onClick={() => handleRequestEdit(teacher)}
                             className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-                            title="Edit"
+                            title="Edit Faculty Details"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
@@ -524,6 +524,7 @@ export const TeacherManagement: React.FC<TeacherManagementProps> = ({
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         batches={batches}
+        teachers={teachers}
         onAddTeacher={onAddTeacher}
       />
 
@@ -590,124 +591,36 @@ export const TeacherManagement: React.FC<TeacherManagementProps> = ({
         </div>
       )}
 
-      {/* Edit Teacher Modal */}
-      {editingTeacher && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl border border-slate-200 space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Edit Faculty Profile</h3>
-                <p className="text-xs text-slate-500">Update contact and specialization details</p>
-              </div>
-              <button
-                onClick={() => setEditingTeacher(null)}
-                className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveEdit} className="space-y-4">
-              <div>
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editingTeacher.name}
-                  onChange={(e) => setEditingTeacher({ ...editingTeacher, name: e.target.value })}
-                  className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                    Phone
-                  </label>
-                  <input
-                    type="tel"
-                    required
-                    value={editingTeacher.phone}
-                    onChange={(e) => setEditingTeacher({ ...editingTeacher, phone: e.target.value })}
-                    className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    value={editingTeacher.email}
-                    onChange={(e) => setEditingTeacher({ ...editingTeacher, email: e.target.value })}
-                    className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                  Qualifications
-                </label>
-                <input
-                  type="text"
-                  value={editingTeacher.qualifications}
-                  onChange={(e) => setEditingTeacher({ ...editingTeacher, qualifications: e.target.value })}
-                  className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                  Status
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingTeacher({ ...editingTeacher, status: 'active' })}
-                    className={`text-xs py-2 rounded-xl font-bold border transition-all ${
-                      editingTeacher.status === 'active'
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                        : 'bg-slate-50 text-slate-500 border-slate-200'
-                    }`}
-                  >
-                    Active
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingTeacher({ ...editingTeacher, status: 'on_leave' })}
-                    className={`text-xs py-2 rounded-xl font-bold border transition-all ${
-                      editingTeacher.status === 'on_leave'
-                        ? 'bg-amber-50 text-amber-700 border-amber-300'
-                        : 'bg-slate-50 text-slate-500 border-slate-200'
-                    }`}
-                  >
-                    On Leave
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setEditingTeacher(null)}
-                  className="text-xs font-bold text-slate-500 px-3 py-2 rounded-xl hover:bg-slate-100"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-all"
-                >
-                  Save Changes
-                </button>
-              </div>
-            </form>
+      {/* Stage 1 Confirmation Before Editing Faculty */}
+      <ConfirmationModal
+        isOpen={isPreEditConfirmOpen}
+        onClose={() => {
+          setIsPreEditConfirmOpen(false);
+          setTeacherToEdit(null);
+        }}
+        onConfirm={handleConfirmPreEdit}
+        title="Confirm Faculty Profile Edit"
+        message={
+          <div>
+            Are you sure you want to edit details of faculty member <strong className="text-slate-900">{teacherToEdit?.name}</strong>?
           </div>
-        </div>
-      )}
+        }
+        confirmText="Yes, Open Edit Form"
+        cancelText="Cancel"
+        variant="primary"
+      />
+
+      {/* Edit Faculty Modal */}
+      <EditTeacherModal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setTeacherToEdit(null);
+        }}
+        teacher={teacherToEdit}
+        batches={batches}
+        onUpdateTeacher={onUpdateTeacher}
+      />
     </div>
   );
 };
